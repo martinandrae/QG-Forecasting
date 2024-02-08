@@ -6,27 +6,74 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 import csv
+import json  # Import json library
+import argparse
+import shutil
+
+# Setup argument parser to accept a JSON config file path
+parser = argparse.ArgumentParser(description='Run model with configuration from JSON file.')
+parser.add_argument('config_path', type=str, help='Path to JSON configuration file.')
+args = parser.parse_args()
+
+# Load configuration from a JSON file
+def load_config(json_file):
+    with open(json_file, 'r') as file:
+        config = json.load(file)
+    return config
+
+config_path = args.config_path
+config = load_config(config_path)
+
+# Constants and configurations loaded from JSON
+iterations = config['iterations']
+name = config['name']
+model_name = config['model']
+spacing = config['spacing']
+filters = config['filters']
+latent_dim = config['latent_dim']
+no_downsamples = config['no_downsamples']
+num_epochs = config['num_epochs']
+loss_function = config['loss_function']
+
+# Your existing class definitions and the rest of the script remain unchanged
+
+# Note: Remember to update your JSON file structure to match the variables you're loading. For example:
+"""
+{
+    "iterations": 101000,
+    "model": "conv",
+    "name": "Test",
+    "spacing": 50,
+    "filters": 16,
+    "latent_dim": 100,
+    "no_downsamples": 2,
+    "num_epochs": 1,
+    "loss_function": "MSE"
+  }
+"""
+
+# Ensure the JSON file paths and parameters match your requirements.
 
 # Constants and configurations
-iterations = 2101000  # Total number of iterations for data generation
 on_remote = False  # Flag to switch between remote and local paths
 
 # Path to the dataset, changes based on the execution environment
 data_path = Path(f'/nobackup/smhid20/users/sm_maran/dpr_data/simulations/QG_samples_SUBS_{iterations}.npy') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/data/QG_samples_SUBS_{iterations}.npy')
+result_path = Path(f'/nobackup/smhid20/users/sm_maran/results/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
+
+# Check if the directory exists, and create it if it doesn't
+if not result_path.exists():
+    result_path.mkdir(parents=True, exist_ok=True)
+
+# Copy the JSON configuration file to the results directory
+config_file_name = Path(config_path).name
+shutil.copy(config_path, result_path / "config.json")
+
 k = 1  # Step size for the dataset generation
 spinup = 1001  # Number of initial samples to skip
 p_train = 0.8  # Proportion of data used for training
 mean_data = 0.003394413273781538  # Mean of the dataset, for normalization
 std_data = 9.174626350402832  # Standard deviation of the dataset, for normalization
-
-spacing = 50  # Spacing between the samples in the dataset
-
-# Model configuration
-filters = 16  # Number of filters in the first convolutional layer of the model
-latent_dim = 100  # Dimensionality of the latent space
-no_downsamples = 2  # Number of downsampling operations in the model
-
-num_epochs = 500  # Number of epochs for training
 
 
 class QGSamplesDataset(Dataset):
@@ -126,7 +173,7 @@ class ConvolutionalAutoencoder(nn.Module):
     """
     Convolutional Autoencoder for encoding and decoding images.
     """
-    def __init__(self, filters, latent_dim=100, no_downsamples=2):
+    def __init__(self, filters, latent_dim, no_downsamples):
         """
         Initializes the model with the specified configuration.
         
@@ -136,11 +183,10 @@ class ConvolutionalAutoencoder(nn.Module):
         - no_downsamples (int): Number of downsampling steps in the encoder.
         """
         super(ConvolutionalAutoencoder, self).__init__()
-        self.image_size = 65  # Assuming square images of size 65x65
+        self.image_size = 65
         self.filters = filters
         self.no_downsamples = no_downsamples
         self.latent_dim = latent_dim
-
 
         dim = self.filters
 
@@ -151,7 +197,6 @@ class ConvolutionalAutoencoder(nn.Module):
         ]
 
         for _ in range(self.no_downsamples):
-            #encoder_layers.append(self._block(dim, dim, kernel_size=3, stride=1))
             encoder_layers.extend(self._block(dim, dim*2, kernel_size=3, stride=1))
             encoder_layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
             dim *= 2
@@ -160,7 +205,6 @@ class ConvolutionalAutoencoder(nn.Module):
         
         encoder_layers.append(nn.Flatten(start_dim=1))
         encoder_layers.append(nn.Linear(in_features=dim * enc_img_sz * enc_img_sz, out_features=self.latent_dim))
-        #encoder_layers.append(nn.Sigmoid())
         self.encoder = nn.Sequential(*encoder_layers)
 
         decoder_layers = [
@@ -171,7 +215,6 @@ class ConvolutionalAutoencoder(nn.Module):
         for _ in range(self.no_downsamples):
             decoder_layers.extend(self._upblock(dim, dim, kernel_size=4, stride=2))
             decoder_layers.extend(self._block(dim, dim//2, kernel_size=3, stride=1))
-            #decoder_layers.append(self._block(dim//2, dim//2, kernel_size=3, stride=1))
             dim //= 2
 
         decoder_layers.append(nn.ConvTranspose2d(in_channels=self.filters, out_channels=1, kernel_size=4, padding=1))
@@ -185,18 +228,16 @@ class ConvolutionalAutoencoder(nn.Module):
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         ]
-        
     
     def _upblock(self, in_channels, out_channels, kernel_size, stride):
         return [
             nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),
-            #nn.BatchNorm2d(out_channels),
             nn.LeakyReLU(0.2, inplace=True)
         ]
     
     @staticmethod
     def init_weights(m):
-        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear) or isinstance(m, nn.ConvTranspose2d):
             torch.nn.init.normal_(m.weight, 0.0, 0.02)
         elif isinstance(m, nn.BatchNorm2d):
             torch.nn.init.normal_(m.weight, 1.0, 0.02)
@@ -207,78 +248,176 @@ class ConvolutionalAutoencoder(nn.Module):
         activations = x  # Store the activations from the encoder
         x = self.decoder(x)
         return x, activations
+
+class ConvolutionalAutoencoder2(nn.Module):
+    """
+    Convolutional Autoencoder for encoding and decoding images.
+    """
+    def __init__(self, filters, latent_dim, no_downsamples):
+        """
+        Initializes the model with the specified configuration.
+        
+        Parameters:
+        - filters (int): Number of filters in the first convolutional layer.
+        - latent_dim (int): Dimensionality of the latent space.
+        - no_downsamples (int): Number of downsampling steps in the encoder.
+        """
+        super(ConvolutionalAutoencoder2, self).__init__()
+        self.image_size = 65
+        self.filters = filters
+        self.no_downsamples = no_downsamples
+        self.latent_dim = latent_dim
+
+        dim = self.filters
+
+        encoder_layers = [
+            nn.Unflatten(1, (1,self.image_size, self.image_size)),
+            nn.Conv2d(in_channels=1, out_channels=self.filters, kernel_size=4, padding=1),
+            nn.ReLU(True),
+        ]
+
+        for _ in range(self.no_downsamples):
+            encoder_layers.extend(self._block(dim, dim*2, kernel_size=4, stride=2))
+            dim *= 2
+
+        enc_img_sz = self.image_size//2**self.no_downsamples
+        
+        encoder_layers.append(nn.Flatten(start_dim=1))
+        encoder_layers.append(nn.Linear(in_features=dim * enc_img_sz * enc_img_sz, out_features=self.latent_dim))
+        self.encoder = nn.Sequential(*encoder_layers)
+
+        decoder_layers = [
+            nn.Linear(in_features=self.latent_dim, out_features=dim * enc_img_sz * enc_img_sz),
+            nn.ReLU(inplace=True),
+            nn.Unflatten(1, (dim, enc_img_sz, enc_img_sz)),
+        ]
+        
+        for _ in range(self.no_downsamples):
+            decoder_layers.extend(self._upblock(dim, dim//2, kernel_size=4, stride=2))
+            dim //= 2
+
+        decoder_layers.append(nn.ConvTranspose2d(in_channels=self.filters, out_channels=1, kernel_size=4, padding=1))
+        decoder_layers.append(nn.Flatten(start_dim=1))
+        self.decoder = nn.Sequential(*decoder_layers)
+        
+        self.apply(self.init_weights)
+
+    def _block(self, in_channels, out_channels, kernel_size, stride):
+        return [
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        ]
     
-# Setup for training and validation
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-# Initialize dataset and dataloader for training and validation
-train_dataset = QGSamplesDataset(data_path, 'train', p_train, k, spinup, spacing, iterations, mean_data, std_data, device)
-val_dataset = QGSamplesDataset(data_path, 'val', p_train, k, spinup, spacing, iterations, mean_data, std_data, device)
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
-
-# Model, loss function, and optimizer
-model = ConvolutionalAutoencoder(filters=filters, latent_dim=latent_dim, no_downsamples=no_downsamples).to(device)
-criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters())
-
-# Additional variables for tracking progress
-loss_values = []
-val_loss_values = []
-best_val_loss = float('inf')
-log_file_path = 'training_log.csv'
-
-
-with open(log_file_path, mode='w', newline='') as file:
-    writer = csv.writer(file)
-    # Write the header
-    writer.writerow(['Epoch', 'Average Training Loss', 'Validation Loss'])
-
-for epoch in range(num_epochs):
-    model.train()  # Set model to training mode
-    total_train_loss = 0
+    def _upblock(self, in_channels, out_channels, kernel_size, stride):
+        return [
+            nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            #nn.LeakyReLU(0.2, inplace=True)
+        ]
     
-    for data, _ in train_loader:
-        img = data
+    @staticmethod
+    def init_weights(m):
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear) or isinstance(m, nn.ConvTranspose2d):
+            torch.nn.init.normal_(m.weight, 0.0, 0.02)
+        elif isinstance(m, nn.BatchNorm2d):
+            torch.nn.init.normal_(m.weight, 1.0, 0.02)
+            torch.nn.init.constant_(m.bias, 0.0)
 
-        optimizer.zero_grad()
+    def forward(self, x):
+        x = self.encoder(x)
+        activations = x  # Store the activations from the encoder
+        x = self.decoder(x)
+        return x, activations
 
-        output, activations = model(img)
+def train():
+    # Setup for training and validation
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        reconstruction_loss = criterion(output, img)
-        loss = reconstruction_loss 
+    # Initialize dataset and dataloader for training and validation
+    train_dataset = QGSamplesDataset(data_path, 'train', p_train, k, spinup, spacing, iterations, mean_data, std_data, device)
+    val_dataset = QGSamplesDataset(data_path, 'val', p_train, k, spinup, spacing, iterations, mean_data, std_data, device)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 
-        total_train_loss += loss.item()
+    # Model, loss function, and optimizer
+    if model_name == "original":
+        model = ConvolutionalAutoencoder(filters=filters, latent_dim=latent_dim, no_downsamples=no_downsamples)
+    elif model_name == "stride":
+        model = ConvolutionalAutoencoder2(filters=filters, latent_dim=latent_dim, no_downsamples=no_downsamples)
+    else:
+        raise Exception("Model not found")
 
-        loss.backward()
-        optimizer.step()
+    if loss_function == "MSE":
+        criterion = nn.MSELoss()
+    elif loss_function == "L1":
+        criterion = nn.L1Loss()
+    else:
+        raise Exception("Loss function not found")
 
-    avg_train_loss = total_train_loss / len(train_loader)
+    model = model.to(device)
 
-    # Validation phase
-    model.eval()  # Set model to evaluation mode
-    total_val_loss = 0
-    with torch.no_grad():
-        for data,_ in val_loader:
-            img = data.to(device)
+    optimizer = optim.Adam(model.parameters())
 
-            output, _ = model(img)
-            loss = criterion(output, img)
-            total_val_loss += loss.item()
+    # Additional variables for tracking progress
+    loss_values = []
+    val_loss_values = []
+    best_val_loss = float('inf')
+    log_file_path = result_path / f'training_log.csv'
 
-    avg_val_loss = total_val_loss / len(val_loader)
-
-    # Checkpointing
-    if avg_val_loss < best_val_loss:
-        best_val_loss = avg_val_loss
-        torch.save(model.state_dict(), 'best_model.pth')
-
-    loss_values.append([avg_train_loss])
-    val_loss_values.append(avg_val_loss)  
-    
-    # Log to CSV
-    with open(log_file_path, mode='a', newline='') as file:
+    with open(log_file_path, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([epoch+1, avg_train_loss, avg_val_loss])
-    
-    #print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}')
+        # Write the header
+        writer.writerow(['Epoch', 'Average Training Loss', 'Validation Loss'])
+
+    for epoch in range(num_epochs):
+        model.train()  # Set model to training mode
+        total_train_loss = 0
+        
+        for data, _ in train_loader:
+            img = data
+
+            optimizer.zero_grad()
+
+            output, activations = model(img)
+
+            reconstruction_loss = criterion(output, img)
+            loss = reconstruction_loss 
+
+            total_train_loss += loss.item()
+
+            loss.backward()
+            optimizer.step()
+
+        avg_train_loss = total_train_loss / len(train_loader)
+
+        # Validation phase
+        model.eval()  # Set model to evaluation mode
+        total_val_loss = 0
+        with torch.no_grad():
+            for data,_ in val_loader:
+                img = data
+
+                output, _ = model(img)
+                loss = criterion(output, img)
+                total_val_loss += loss.item()
+
+        avg_val_loss = total_val_loss / len(val_loader)
+
+        # Checkpointing
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            torch.save(model.state_dict(), result_path/f'best_model.pth')
+
+        loss_values.append([avg_train_loss])
+        val_loss_values.append(avg_val_loss)  
+        
+        # Log to CSV
+        with open(log_file_path, mode='a', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow([epoch+1, avg_train_loss, avg_val_loss])
+        
+        #print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}')
+
+train()
