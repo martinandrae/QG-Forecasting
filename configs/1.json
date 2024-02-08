@@ -1,0 +1,11 @@
+{
+    "iterations": 2101000,
+    "model": "original",
+    "name": "original-2ds-16f",
+    "spacing": 10,
+    "filters": 16,
+    "latent_dim": 100,
+    "no_downsamples": 2,
+    "num_epochs": 25,
+    "loss_function": "MSE"
+  }

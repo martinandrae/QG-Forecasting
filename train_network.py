@@ -232,7 +232,8 @@ class ConvolutionalAutoencoder(nn.Module):
     def _upblock(self, in_channels, out_channels, kernel_size, stride):
         return [
             nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),
-            nn.LeakyReLU(0.2, inplace=True)
+            nn.ReLU(inplace=True)
+            #nn.LeakyReLU(0.2, inplace=True)
         ]
     
     @staticmethod
@@ -418,6 +419,9 @@ def train():
             writer = csv.writer(file)
             writer.writerow([epoch+1, avg_train_loss, avg_val_loss])
         
-        #print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}')
+        print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}')
+    
+    
+    torch.save(model.state_dict(), result_path/f'final_model.pth')
 
 train()
