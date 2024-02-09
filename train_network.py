@@ -332,6 +332,175 @@ class ConvolutionalAutoencoder2(nn.Module):
         x = self.decoder(x)
         return x, activations
 
+class FullyConvolutionalAutoencoder4(nn.Module):
+    """
+    Convolutional Autoencoder for encoding and decoding images.
+    """
+    def __init__(self, filters, latent_dim=100, no_downsamples=2, activation=nn.ReLU(True)):
+        """
+        Initializes the model with the specified configuration.
+        
+        Parameters:
+        - filters (int): Number of filters in the first convolutional layer.
+        - latent_dim (int): Dimensionality of the latent space.
+        - no_downsamples (int): Number of downsampling steps in the encoder.
+        """
+        super(FullyConvolutionalAutoencoder4, self).__init__()
+        self.image_size = 65
+        self.filters = filters
+        self.no_downsamples = no_downsamples
+        self.latent_dim = latent_dim
+        self.activation = activation             #nn.LeakyReLU(0.2, inplace=True)
+
+        dim = self.filters
+
+        encoder_layers = [
+            nn.Unflatten(1, (1,self.image_size, self.image_size)),
+            nn.Conv2d(in_channels=1, out_channels=self.filters, kernel_size=4, padding=1),
+            self.activation,
+        ]
+
+        for _ in range(self.no_downsamples):
+            encoder_layers.extend(self._block(dim, dim*2, kernel_size=3, stride=1))
+            dim *= 2
+            encoder_layers.extend(self._block(dim, dim, kernel_size=4, stride=2))
+
+        enc_img_sz = self.image_size//2**self.no_downsamples
+        
+        #encoder_layers.append(nn.Flatten(start_dim=1))
+        #encoder_layers.append(nn.Linear(in_features=dim * enc_img_sz * enc_img_sz, out_features=self.latent_dim))
+        encoder_layers.append(nn.Conv2d(in_channels=dim, out_channels=6, kernel_size=3, padding=1))
+        self.encoder = nn.Sequential(*encoder_layers)
+
+        decoder_layers = [
+            #nn.Linear(in_features=self.latent_dim, out_features=dim * enc_img_sz * enc_img_sz),
+            #self.activation,
+            #nn.Unflatten(1, (dim, enc_img_sz, enc_img_sz)),
+        ]
+        decoder_layers.extend(self._block(6, dim, kernel_size=3, stride=1))
+        for _ in range(self.no_downsamples):
+            decoder_layers.extend(self._upblock(dim, dim//2, kernel_size=4, stride=2))
+            dim //= 2
+            decoder_layers.extend(self._block(dim, dim, kernel_size=3, stride=1))
+            
+        decoder_layers.append(nn.ConvTranspose2d(in_channels=self.filters, out_channels=1, kernel_size=4, padding=1))
+        decoder_layers.append(nn.Flatten(start_dim=1))
+        self.decoder = nn.Sequential(*decoder_layers)
+        
+        self.apply(self.init_weights)
+
+    def _block(self, in_channels, out_channels, kernel_size, stride):
+        return [
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),
+            nn.BatchNorm2d(out_channels),
+            self.activation,
+        ]
+    
+    def _upblock(self, in_channels, out_channels, kernel_size, stride):
+        return [
+            nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),
+            nn.BatchNorm2d(out_channels),
+            self.activation,
+        ]
+    
+    @staticmethod
+    def init_weights(m):
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear) or isinstance(m, nn.ConvTranspose2d):
+            torch.nn.init.normal_(m.weight, 0.0, 0.02)
+        elif isinstance(m, nn.BatchNorm2d):
+            torch.nn.init.normal_(m.weight, 1.0, 0.02)
+            torch.nn.init.constant_(m.bias, 0.0)
+
+    def forward(self, x):
+        x = self.encoder(x)
+        activations = x  # Store the activations from the encoder
+        x = self.decoder(x)
+        return x, activations
+
+class ConvolutionalAutoencoder4(nn.Module):
+    """
+    Convolutional Autoencoder for encoding and decoding images.
+    """
+    def __init__(self, filters, latent_dim=100, no_downsamples=2, activation=nn.ReLU(True)):
+        """
+        Initializes the model with the specified configuration.
+        
+        Parameters:
+        - filters (int): Number of filters in the first convolutional layer.
+        - latent_dim (int): Dimensionality of the latent space.
+        - no_downsamples (int): Number of downsampling steps in the encoder.
+        """
+        super(ConvolutionalAutoencoder4, self).__init__()
+        self.image_size = 65
+        self.filters = filters
+        self.no_downsamples = no_downsamples
+        self.latent_dim = latent_dim
+        self.activation = activation             #nn.LeakyReLU(0.2, inplace=True)
+
+        dim = self.filters
+
+        encoder_layers = [
+            nn.Unflatten(1, (1,self.image_size, self.image_size)),
+            nn.Conv2d(in_channels=1, out_channels=self.filters, kernel_size=4, padding=1),
+            self.activation,
+        ]
+
+        for _ in range(self.no_downsamples):
+            encoder_layers.extend(self._block(dim, dim*2, kernel_size=3, stride=1))
+            dim *= 2
+            encoder_layers.extend(self._block(dim, dim, kernel_size=4, stride=2))
+
+        enc_img_sz = self.image_size//2**self.no_downsamples
+        
+        encoder_layers.append(nn.Flatten(start_dim=1))
+        encoder_layers.append(nn.Linear(in_features=dim * enc_img_sz * enc_img_sz, out_features=self.latent_dim))
+        self.encoder = nn.Sequential(*encoder_layers)
+
+        decoder_layers = [
+            nn.Linear(in_features=self.latent_dim, out_features=dim * enc_img_sz * enc_img_sz),
+            self.activation,
+            nn.Unflatten(1, (dim, enc_img_sz, enc_img_sz)),
+        ]
+        
+        for _ in range(self.no_downsamples):
+            decoder_layers.extend(self._upblock(dim, dim//2, kernel_size=4, stride=2))
+            dim //= 2
+            decoder_layers.extend(self._block(dim, dim, kernel_size=3, stride=1))
+            
+        decoder_layers.append(nn.ConvTranspose2d(in_channels=self.filters, out_channels=1, kernel_size=4, padding=1))
+        decoder_layers.append(nn.Flatten(start_dim=1))
+        self.decoder = nn.Sequential(*decoder_layers)
+        
+        self.apply(self.init_weights)
+
+    def _block(self, in_channels, out_channels, kernel_size, stride):
+        return [
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),
+            nn.BatchNorm2d(out_channels),
+            self.activation,
+        ]
+    
+    def _upblock(self, in_channels, out_channels, kernel_size, stride):
+        return [
+            nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),
+            nn.BatchNorm2d(out_channels),
+            self.activation,
+        ]
+    
+    @staticmethod
+    def init_weights(m):
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear) or isinstance(m, nn.ConvTranspose2d):
+            torch.nn.init.normal_(m.weight, 0.0, 0.02)
+        elif isinstance(m, nn.BatchNorm2d):
+            torch.nn.init.normal_(m.weight, 1.0, 0.02)
+            torch.nn.init.constant_(m.bias, 0.0)
+
+    def forward(self, x):
+        x = self.encoder(x)
+        activations = x  # Store the activations from the encoder
+        x = self.decoder(x)
+        return x, activations
+
 def train():
     # Setup for training and validation
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -347,6 +516,10 @@ def train():
         model = ConvolutionalAutoencoder(filters=filters, latent_dim=latent_dim, no_downsamples=no_downsamples)
     elif model_name == "stride":
         model = ConvolutionalAutoencoder2(filters=filters, latent_dim=latent_dim, no_downsamples=no_downsamples)
+    elif model_name == "twice":
+        model = ConvolutionalAutoencoder4(filters=filters, latent_dim=latent_dim, no_downsamples=no_downsamples)
+    elif model_name == "fully":
+        model = FullyConvolutionalAutoencoder4(filters=filters, latent_dim=latent_dim, no_downsamples=no_downsamples)
     else:
         raise Exception("Model not found")
 
