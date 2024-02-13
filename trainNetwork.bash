@@ -1,10 +1,7 @@
 #!/bin/bash
-#SBATCH -J mscthesiswork
 #SBATCH -J mscthesis
-#SBATCH -t 12:00:00
+#SBATCH -t 6-00:00:00
 #SBATCH -N 1
-#SBATCH --mem=10000
-#SBATCH --exclusive
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=mandra@kth.se
 #
@@ -16,8 +13,11 @@ conda activate processing
 # Path to your Python script
 PYTHON_SCRIPT_PATH="train_network.py"
 
-# Path to your JSON configuration file
-CONFIG_JSON_PATH="config.json"
+# The first command line argument specifies the config number
+CONFIG_NUMBER="$1"
+
+# Construct the path to your JSON configuration file dynamically
+CONFIG_JSON_PATH="configs/${CONFIG_NUMBER}.json"
 
 # Execute Python script with JSON configuration
 python $PYTHON_SCRIPT_PATH $CONFIG_JSON_PATH
