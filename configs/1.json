@@ -1,13 +1,13 @@
 {
-    "iterations": 2101000,
-    "model": "fully",
-    "name": "fully-4ds-8f-100l-150e-MSE-0wd-0.00001l1",
-    "spacing": 1,
-    "filters": 8,
-    "latent_dim": 100,
-    "no_downsamples": 4,
-    "num_epochs": 150,
-    "loss_function": "MSE",
-    "weight_decay": 0,
-    "l1_penalty": 0.00001
-  }
+  "iterations": 2101000,
+  "model": "fully",
+  "name": "fully-4ds-8f-100l-150e-MSE-0wd-0.00001l1",
+  "spacing": 1,
+  "filters": 8,
+  "latent_dim": 100,
+  "no_downsamples": 4,
+  "num_epochs": 150,
+  "loss_function": "MSE",
+  "weight_decay": 0,
+  "l1_penalty": 0.00001
+}
