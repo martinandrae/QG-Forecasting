@@ -1,7 +1,7 @@
 {
   "iterations": 2101000,
-  "model": "fully",
-  "name": "fully-4ds-16f-100l-150e-MSE-0.000001wd-0.00001l1",
+  "model": "twice",
+  "name": "twice-4ds-16f-100l-150e-MSE-0.000001wd-0.00001l1",
   "spacing": 1,
   "filters": 16,
   "latent_dim": 100,
