@@ -55,7 +55,7 @@ loss_function = config['loss_function']
 # Ensure the JSON file paths and parameters match your requirements.
 
 # Constants and configurations
-on_remote = False  # Flag to switch between remote and local paths
+on_remote = True  # Flag to switch between remote and local paths
 
 # Path to the dataset, changes based on the execution environment
 data_path = Path(f'/nobackup/smhid20/users/sm_maran/dpr_data/simulations/QG_samples_SUBS_{iterations}.npy') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/data/QG_samples_SUBS_{iterations}.npy')
