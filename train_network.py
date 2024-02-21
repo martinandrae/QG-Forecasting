@@ -34,32 +34,37 @@ latent_dim = config['latent_dim']
 no_downsamples = config['no_downsamples']
 num_epochs = config['num_epochs']
 loss_function = config['loss_function']
+weight_decay = config['weight_decay']
+l1_penalty = config['l1_penalty']
 
 # Your existing class definitions and the rest of the script remain unchanged
 
 # Note: Remember to update your JSON file structure to match the variables you're loading. For example:
 """
 {
-    "iterations": 101000,
-    "model": "conv",
-    "name": "Test",
-    "spacing": 50,
-    "filters": 16,
-    "latent_dim": 100,
-    "no_downsamples": 2,
-    "num_epochs": 1,
-    "loss_function": "MSE"
-  }
+  "iterations": 2101000,
+  "model": "fully",
+  "name": "fully-4ds-8f-100l-150e-MSE-0wd-0.00001l1",
+  "spacing": 1,
+  "filters": 8,
+  "latent_dim": 100,
+  "no_downsamples": 4,
+  "num_epochs": 150,
+  "loss_function": "MSE",
+  "weight_decay": 0,
+  "l1_penalty": 0.00001
+}
 """
 
 # Ensure the JSON file paths and parameters match your requirements.
 
 # Constants and configurations
 on_remote = True  # Flag to switch between remote and local paths
+date = '2024-02-21'  # Date of the experiment
 
 # Path to the dataset, changes based on the execution environment
 data_path = Path(f'/nobackup/smhid20/users/sm_maran/dpr_data/simulations/QG_samples_SUBS_{iterations}.npy') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/data/QG_samples_SUBS_{iterations}.npy')
-result_path = Path(f'/nobackup/smhid20/users/sm_maran/results/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
+result_path = Path(f'/nobackup/smhid20/users/sm_maran/results/{date}/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
 
 # Check if the directory exists, and create it if it doesn't
 if not result_path.exists():
@@ -75,30 +80,24 @@ p_train = 0.8  # Proportion of data used for training
 mean_data = 0.003394413273781538  # Mean of the dataset, for normalization
 std_data = 9.174626350402832  # Standard deviation of the dataset, for normalization
 
-
 class QGSamplesDataset(Dataset):
-    """
-    Custom Dataset class for loading QG samples.
-    Lazily loads data to manage memory usage efficiently.
-    """
     def __init__(self, data_path, mode, p_train, k, spinup, spacing, iterations, mean_data, std_data, device, transform=None):
         """
-        Initializes the dataset object.
-        
+        Custom Dataset for loading QG samples lazily.
+
         Parameters:
-        - data_path (Path): Path to the dataset files.
+        - data_path (str): Path to the dataset files.
         - mode (str): Mode of the dataset to be loaded ('train', 'val', 'test').
         - p_train (float): Percentage of data to be used for training.
         - k, spinup, spacing, iterations: Parameters for data generation.
-        - mean_data, std_data: Normalization parameters.
-        - device (torch.device): Device to load the tensors onto.
         - transform (callable, optional): Optional transform to be applied on a sample.
         """
-        # Initialization and dataset configuration
         self.data_path = data_path
         self.data_dtype = 'float32'
         self.device = device
+
         self.mode = mode
+
         self.p_train = p_train
         self.k = k
         self.spinup = spinup
@@ -106,12 +105,13 @@ class QGSamplesDataset(Dataset):
         self.iterations = iterations
         self.mean_data = mean_data
         self.std_data = std_data
+
         self.transform = transform
 
-        # Calculate dataset dimensions and generate indices for data access
         self.total_rows, self.total_columns = self._calculate_dimensions()
         self.X_indices, self.Y_indices = self._generate_indices()
-        self.mmap = self.create_mmap()  # Memory-map the dataset file for efficient data loading
+
+        self.mmap = self.create_mmap()
 
     
     def create_mmap(self):
@@ -167,8 +167,12 @@ class QGSamplesDataset(Dataset):
         X_sample = torch.tensor(X_sample, dtype=torch.float32).to(self.device)
         Y_sample = torch.tensor(Y_sample, dtype=torch.float32).to(self.device)
 
-        return X_sample, Y_sample
+        # View the samples as 2D images
+        X_sample = X_sample.view(-1, 65, 65)
+        Y_sample = Y_sample.view(-1, 65, 65)
 
+        return X_sample, Y_sample
+        
 class ConvolutionalAutoencoder(nn.Module):
     """
     Convolutional Autoencoder for encoding and decoding images.
@@ -501,6 +505,129 @@ class ConvolutionalAutoencoder4(nn.Module):
         x = self.decoder(x)
         return x, activations
 
+class Autoencoder(nn.Module):
+    """
+    Convolutional Autoencoder for encoding and decoding images.
+    """
+    def __init__(self, filters, no_latent_channels=2, no_downsamples=3, image_size = 65, input_channels = 1, activation=nn.ReLU(True)):
+        """
+        Initializes the model with the specified configuration.
+        
+        Parameters:
+        - filters (int): Number of filters in the first convolutional layer.
+        - no_latent_channels (int): Number of channels in the latent space.
+        - no_downsamples (int): Number of downsampling steps in the encoder.
+        - activation (nn.Module): Activation function to use in the model.
+        """
+        super(Autoencoder, self).__init__()
+        self.image_size = image_size
+        self.input_channels = input_channels
+        self.filters = filters
+        self.no_downsamples = no_downsamples
+        self.no_latent_channels = no_latent_channels
+        self.activation = activation
+
+        kernel_size = 4
+
+        dim = self.filters
+
+        # Encoder
+        self.downs = nn.ModuleList()
+        encoder_layers = []
+
+        # Construct the encoder layers
+        for i in range(self.no_downsamples+1):
+            if i == 0:
+                encoder_layers.extend(self._block(self.input_channels, dim, kernel_size=kernel_size, stride=1, batchnorm=False))
+            else:
+                encoder_layers.extend(self._block(dim, dim, kernel_size=4, stride=2))
+                encoder_layers.extend(self._block(dim, dim*2, kernel_size=3, stride=1))
+                dim *= 2
+
+            if i == self.no_downsamples:
+                encoder_layers.append(nn.Conv2d(dim, self.no_latent_channels, kernel_size=3, padding=1))
+            else:
+                encoder_layers.extend(self._block(dim, dim, kernel_size=3, stride=1))
+
+            self.downs.append(nn.Sequential(*encoder_layers))
+            encoder_layers = []
+        
+        # Decoder
+        self.ups = nn.ModuleList()
+        decoder_layers = []
+
+        # Construct the decoder layers
+        for i in range(self.no_downsamples + 1):
+            if i == 0:
+                decoder_layers.extend(self._block(self.no_latent_channels, dim, kernel_size=3, stride=1))
+            else:
+                decoder_layers.extend(self._block(dim, dim, kernel_size=3, stride=1))
+            
+            if i == self.no_downsamples:
+                decoder_layers.append(nn.ConvTranspose2d(in_channels=dim, out_channels=self.input_channels, kernel_size=kernel_size, padding=1))
+            else:
+                dim //= 2
+                decoder_layers.extend(self._block(dim*2, dim, kernel_size=3, stride=1))
+                decoder_layers.extend(self._upblock(dim, dim, kernel_size=4, stride=2))
+
+            self.ups.append(nn.Sequential(*decoder_layers))
+            decoder_layers = []
+            
+        # Initialize weights
+        self.apply(self.init_weights)
+
+    def _block(self, in_channels, out_channels, kernel_size, stride, batchnorm=True):
+        """
+        Helper function to create a convolutional block with optional batch normalization and activation.
+        """
+        layers = [nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),]
+        if batchnorm:
+            layers.append(nn.BatchNorm2d(out_channels))
+        layers.append(self.activation)
+        return layers
+        
+    def _upblock(self, in_channels, out_channels, kernel_size, stride):
+        """
+        Helper function to create a transposed convolutional block with batch normalization and activation.
+        """
+        return [
+            nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1),
+            nn.BatchNorm2d(out_channels),
+            self.activation,
+        ]
+    
+    @staticmethod
+    def init_weights(m):
+        """
+        Initialize weights of the model.
+        """
+        if isinstance(m, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            torch.nn.init.normal_(m.weight, 0.0, 0.02)
+        elif isinstance(m, nn.BatchNorm2d):
+            torch.nn.init.normal_(m.weight, 1.0, 0.02)
+            torch.nn.init.constant_(m.bias, 0.0)
+    
+    def encoder(self, x):
+        for down in self.downs:
+            x = down(x)
+        return x
+    
+    def decoder(self, x):
+        for up in self.ups:
+            x = up(x)
+        return x
+    
+    def forward(self, x):
+        """
+        Forward pass through the U-Net.
+        """
+        
+        x = self.encoder(x)
+        activations = x
+        x = self.decoder(x)
+            
+        return x, activations
+
 def train():
     # Setup for training and validation
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -520,6 +647,8 @@ def train():
         model = ConvolutionalAutoencoder4(filters=filters, latent_dim=latent_dim, no_downsamples=no_downsamples)
     elif model_name == "fully":
         model = FullyConvolutionalAutoencoder4(filters=filters, latent_dim=latent_dim, no_downsamples=no_downsamples)
+    elif model_name == "autoencoder":
+        model = Autoencoder(filters=filters, no_latent_channels=latent_dim, no_downsamples=no_downsamples)
     else:
         raise Exception("Model not found")
 
@@ -532,7 +661,7 @@ def train():
 
     model = model.to(device)
 
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.Adam(model.parameters(), weight_decay=weight_decay)
 
     # Additional variables for tracking progress
     loss_values = []
@@ -556,9 +685,12 @@ def train():
 
             output, activations = model(img)
 
-            reconstruction_loss = criterion(output, img)
-            loss = reconstruction_loss 
+            loss = criterion(output, img)
 
+            if l1_penalty > 0:
+                l1_loss = torch.mean(torch.norm(activations, 1, dim=1))
+                loss += l1_penalty * l1_loss
+            
             total_train_loss += loss.item()
 
             loss.backward()

@@ -1,13 +1,13 @@
 {
   "iterations": 2101000,
-  "model": "twice",
-  "name": "twice-4ds-8f-100l-150e-MSE-0wd-0.00001l1",
+  "model": "autoencoder",
+  "name": "ae-2ds-32f-1l-150e-L1-0wd-0.00001l1",
   "spacing": 1,
-  "filters": 8,
-  "latent_dim": 100,
-  "no_downsamples": 4,
+  "filters": 32,
+  "latent_dim": 1,
+  "no_downsamples": 2,
   "num_epochs": 150,
-  "loss_function": "MSE",
+  "loss_function": "L1",
   "weight_decay": 0,
   "l1_penalty": 0.00001
 }
