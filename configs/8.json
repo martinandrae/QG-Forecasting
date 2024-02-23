@@ -1,13 +1,10 @@
 {
   "iterations": 2101000,
-  "model": "autoencoder",
-  "name": "ae-2ds-32f-1l-150e-L1-0.00001wd-0.00001l1",
+  "model": "forecast",
+  "name": "forecast-64f-2ds-150k",
   "spacing": 1,
-  "filters": 32,
-  "latent_dim": 1,
+  "filters": 64,
   "no_downsamples": 2,
   "num_epochs": 150,
-  "loss_function": "L1",
-  "weight_decay": 0.00001,
-  "l1_penalty": 0.00001
+  "k": 150
 }
