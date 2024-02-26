@@ -94,7 +94,7 @@ def train():
     ae_no_downsamples = parameters['no_downsamples']
 
     # Create an instance of the ConvolutionalAutoencoder class
-    autoencoder = Autoencoder(filters= ae_filters, no_latent_channels=latent_dim, ae_no_downsamples=no_downsamples)
+    autoencoder = Autoencoder(filters= ae_filters, no_latent_channels=latent_dim, no_downsamples=ae_no_downsamples)
 
     # Load the state_dict of the saved model into the conv_autoencoder
     autoencoder.load_state_dict(saved_model)
