@@ -1,0 +1,11 @@
+{
+    "name": "ddpmpp-f64-k150",
+    "model": "ddpmpp",
+    "k": 150,
+    "filters": 64,
+    "wd": 0.1,
+    "lr": 0.001,
+    "num_epochs": 32,
+    "spacing": 1,
+    "iterations": 2101000
+  }

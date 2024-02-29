@@ -1,10 +1,11 @@
 {
-  "iterations": 2101000,
-  "model": "forecast",
-  "name": "forecast-32f-2ds-50k",
-  "spacing": 1,
+  "name": "ncsnpp-f32-k100",
+  "model": "ncsnpp",
+  "k": 100,
   "filters": 32,
-  "no_downsamples": 2,
-  "num_epochs": 150,
-  "k": 50
+  "wd": 0.1,
+  "lr": 0.001,
+  "num_epochs": 32,
+  "spacing": 1,
+  "iterations": 2101000
 }

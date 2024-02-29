@@ -1,10 +1,11 @@
 {
-  "iterations": 2101000,
-  "model": "generate",
-  "name": "generate-32f-3ds-50k",
+  "name": "ncsnpp-f128-k50",
+  "model": "ncsnpp",
+  "k": 50,
+  "filters": 128,
+  "wd": 0.1,
+  "lr": 0.001,
+  "num_epochs": 32,
   "spacing": 1,
-  "filters": 32,
-  "no_downsamples": 3,
-  "num_epochs": 150,
-  "k": 50
+  "iterations": 2101000
 }

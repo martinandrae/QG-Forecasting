@@ -1,0 +1,11 @@
+{
+    "name": "ncsnpp-f64-k150-lr0.0001",
+    "model": "ncsnpp",
+    "k": 150,
+    "filters": 64,
+    "wd": 0.1,
+    "lr": 0.0001,
+    "num_epochs": 32,
+    "spacing": 1,
+    "iterations": 2101000
+  }
