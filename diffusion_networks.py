@@ -1,8 +1,12 @@
 import torch
 import torch.nn as nn
 import math
+from edm_networks import *
 
-# Minimal U-Net
+"""Model architectures and preconditioning schemes used in the paper"""
+
+#----------------------------------------------------------------------------
+# Simple Unet
 class Block(nn.Module):
     def __init__(self, in_ch, out_ch, time_emb_dim, up=False):
         super().__init__()
@@ -62,7 +66,7 @@ class SimpleUnet(nn.Module):
 
         down_channels = [filters * 2**i for i in range(no_downsamples + 1)]
         up_channels = list(reversed(down_channels))
-        out_channels = 1
+        out_channels = image_channels//2
 
         # Time embedding
         self.time_mlp = nn.Sequential(
@@ -108,9 +112,15 @@ class SimpleUnet(nn.Module):
             x = up(x, t)
         return self.output(x)
 
+
+# ------------------------------------------------------------------------------
+# Model
+    
+
+# ------------------------------------------------------------------------------
 # Preconditioner
 class GCPrecond(torch.nn.Module):
-    def __init__(self, sigma_data=1, sigma_min=0.02, sigma_max=88, filters=32, no_downsamples=2, img_channels=1, img_resolution = 65, time_emb_dim=16, isLatent=True):
+    def __init__(self, sigma_data=1, sigma_min=0.02, sigma_max=88, filters=128, model = 'ncsnpp', img_channels=1, img_resolution = 65, time_emb_dim=16, isLatent=True):
         super(GCPrecond, self).__init__()
         self.sigma_data = sigma_data
         self.sigma_min = sigma_min
@@ -119,8 +129,22 @@ class GCPrecond(torch.nn.Module):
         self.img_resolution = img_resolution
         self.img_channels = img_channels
 
-        self.model = SimpleUnet(filters=filters, no_downsamples=no_downsamples, image_channels=self.img_channels, time_emb_dim=time_emb_dim, isLatent=isLatent)
-
+        if model == 'ddpmpp':
+            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
+                                embedding_type='positional', encoder_type='standard', decoder_type='standard', \
+                                channel_mult_noise=1, resample_filter=[1,1], model_channels=filters, channel_mult=[2,2,2],
+                                num_blocks=4, )
+        elif model == 'ncsnpp':
+            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
+                                embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
+                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2])
+        else:
+            raise ValueError('Model not recognized')
+    
+        #self.model = SimpleUnet(filters=filters, no_downsamples=no_downsamples, image_channels=self.img_channels, time_emb_dim=time_emb_dim, isLatent=isLatent)
+        #self.model = DhariwalUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, model_channels=192, channel_mult=[1,2,3,4])
+        #self.model = CuboidTransformerUNet(input_shape=(img_channels, img_resolution, img_resolution, batch_size), target_shape=(1, img_resolution, img_resolution, batch_size))
+        
     def forward(self, x, sigma, class_labels=None):
         dtype = torch.float32
         x = x.to(dtype) # EMA does this
@@ -132,7 +156,7 @@ class GCPrecond(torch.nn.Module):
         c_in = 1 / (self.sigma_data ** 2 + sigma ** 2).sqrt()
         c_noise = sigma.log() / 4
 
-        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels=class_labels)
+        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels)
         assert F_x.dtype == dtype
         D_x = c_skip * x + c_out * F_x.to(dtype)
         
@@ -142,6 +166,8 @@ class GCPrecond(torch.nn.Module):
         return torch.as_tensor(sigma)
     
 
+# ------------------------------------------------------------------------------
+# Loss function
 class GCLoss:
     def __init__(self, sigma_min=0.02, sigma_max=88, rho=7, sigma_data=1):
         self.sigma_min = sigma_min

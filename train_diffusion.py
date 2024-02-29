@@ -34,20 +34,23 @@ model_name = config['model']
 spacing = config['spacing']
 filters = config['filters']
 num_epochs = config['num_epochs']
-no_downsamples = config['no_downsamples']
+wd = config['wd']
 k = config['k']
+lr = config['lr']
 
 # Ensure the JSON file paths and parameters match your requirements.
 
 # Constants and configurations
 on_remote = True  # Flag to switch between remote and local paths
-date = '2024-02-21'  # Date of the experiment
+autoencoder_date = '2024-02-21'  # Date of the experiment
 
 autoencoder_model = 'ae-2ds-32f-1l-150e-L1-0wd-0.00001l1' #'ae-3ds-16f-2l-150e-L1-0wd-0.00001l1'# 
-autoencoder_path = Path(f'/nobackup/smhid20/users/sm_maran/results/{date}/{autoencoder_model}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{date}/{autoencoder_model}/')
+autoencoder_path = Path(f'/nobackup/smhid20/users/sm_maran/results/{autoencoder_date}/{autoencoder_model}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{autoencoder_date}/{autoencoder_model}/')
 
 # Path to the dataset, changes based on the execution environment
 data_path = Path(f'/nobackup/smhid20/users/sm_maran/dpr_data/simulations/QG_samples_SUBS_{iterations}.npy') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/data/QG_samples_SUBS_{iterations}.npy')
+
+date = '2024-02-29'  # Date of the experiment
 result_path = Path(f'/nobackup/smhid20/users/sm_maran/results/{date}/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
 
 # Check if the directory exists, and create it if it doesn't
@@ -63,9 +66,11 @@ p_train = 0.8  # Proportion of data used for training
 mean_data = 0.003394413273781538  # Mean of the dataset, for normalization
 std_data = 9.174626350402832  # Standard deviation of the dataset, for normalization
 
-mean_data_latent = -0.661827802658081
-std_data_latent = 5.319980144500732
-std_residual_latent = 5.724194526672363
+mean_data_latent = -0.6132266521453857 # -0.6324582099914551
+std_data_latent = 5.066834926605225 # 5.280972003936768
+std_residual_latent =5.375336170196533# 5.724194526672363
+ 
+batch_size = 64
 
 from utils import *
 from autoencoder import Autoencoder
@@ -76,8 +81,8 @@ def train():
 
     train_dataset = QGSamplesDataset(data_path, 'train', p_train, k, spinup, spacing, iterations, mean_data, std_data, device)
     val_dataset = QGSamplesDataset(data_path, 'val', p_train, k, spinup, spacing, iterations, mean_data, std_data, device)
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
     # Both Generation and Forecasting
     import json
@@ -104,19 +109,18 @@ def train():
 
     print("Autoencoder loaded successfully!")
 
-    if model_name == "generate":
-        forecasting = False
-        model = GCPrecond(sigma_data=1, filters=filters, no_downsamples=no_downsamples, img_channels=1, img_resolution = 16)
+    forecasting = True# if model_name == "generate" else True
     
-    elif model_name == "forecast":
-        forecasting = True
-        model = GCPrecond(sigma_data=1, filters=filters, no_downsamples=no_downsamples, img_channels=2, img_resolution = 16)
-    
+    model = GCPrecond(filters=filters, img_channels=2 if forecasting else 1, model=model_name, img_resolution = 16)
+
     print("Num params: ", sum(p.numel() for p in model.parameters()))
 
     model.to(device)
 
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
+    warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.001, end_factor=1.0, total_iters=1000)
+
     loss_fn = GCLoss()
 
     loss_values = []
@@ -127,14 +131,9 @@ def train():
     log_file_path = result_path / f'training_log.csv'
     with open(log_file_path, mode='w', newline='') as file:
         writer = csv.writer(file)
-        # Write the header
         writer.writerow(['Epoch', 'Average Training Loss', 'Validation Loss'])
 
-    import time
-    # Training loop
-
     for epoch in range(num_epochs):
-        start_time = time.time()
 
         model.train()  # Set model to training mode
         total_train_loss = 0
@@ -157,12 +156,11 @@ def train():
             total_train_loss += loss.item()
             loss.backward()
             optimizer.step()
+
+            warmup_scheduler.step()
         
         avg_train_loss = total_train_loss / len(train_loader)
         
-        train_time = time.time() - start_time
-        start_time = time.time()
-
         # Validation phase
         model.eval()  # Set model to evaluation mode
         total_val_loss = 0
@@ -187,12 +185,8 @@ def train():
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), result_path/f'best_model.pth')
-
-        val_time = time.time() - start_time
-        start_time = time.time()
-        # scheduler.step()
-
-        sample_time = time.time() - start_time
+        
+        scheduler.step()
         
         # Log to CSV    
         loss_values.append([avg_train_loss])
@@ -204,7 +198,6 @@ def train():
             writer.writerow([epoch+1, avg_train_loss, avg_val_loss])
         
         print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}')
-        print(f'Training time: {train_time:.5f}s, Validation time: {val_time:.5f}s, Sample time: {sample_time:.5f}s')
 
     torch.save(model.state_dict(), result_path/f'final_model.pth')
 
