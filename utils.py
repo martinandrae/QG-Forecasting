@@ -94,3 +94,53 @@ class QGSamplesDataset(torch.utils.data.Dataset):
 
         return X_sample, Y_sample
     
+
+class NWPDataset(torch.utils.data.Dataset):
+    def __init__(self, data_path, n_val,  device):
+        """
+        Custom Dataset for loading QG samples lazily.
+
+        Parameters:
+        - data_path (str): Path to the dataset files.
+        - mode (str): Mode of the dataset to be loaded ('train', 'val', 'test').
+        - p_train (float): Percentage of data to be used for training.
+        - k, spinup, spacing, iterations: Parameters for data generation.
+        - transform (callable, optional): Optional transform to be applied on a sample.
+        """
+        self.data_path = data_path
+        self.data_dtype = 'float32'
+        self.device = device
+        
+        self.n_val = n_val
+        self.kmax=150
+        self.total_rows, self.total_columns = self._calculate_dimensions()
+
+        self.mmap = self.create_mmap()
+
+    def _calculate_dimensions(self):
+        total_rows = self.n_val - self.kmax
+        total_columns = 4225 
+        return total_rows, total_columns
+    
+    def create_mmap(self):
+        return np.memmap(self.data_path, dtype=self.data_dtype, mode='r', shape=(self.total_rows, self.total_columns))
+
+    
+    def __len__(self):
+        # Return the length of the dataset
+        return self.total_rows
+
+    def __getitem__(self, idx):
+
+        # Access the specific samples directly from the memory-mapped array
+        # This operation does not load the entire dataset into memory
+        X_sample = self.mmap[idx, :].astype(self.data_dtype)
+
+        # Convert to tensors before returning
+        X_sample = torch.tensor(X_sample, dtype=torch.float32).to(self.device)
+
+        # View the samples as 2D images
+        X_sample = X_sample.view(-1, 65, 65)
+
+        return X_sample 
+    
