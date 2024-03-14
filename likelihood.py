@@ -1,43 +1,30 @@
-# coding=utf-8
-# Copyright 2020 The Google Research Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-# pylint: skip-file
-# pytype: skip-file
-"""Various sampling methods."""
-
+from scipy import integrate
 import torch
 import numpy as np
-from scipy import integrate
-from models import utils as mutils
-
 
 def get_div_fn(fn):
   """Create the divergence function of `fn` using the Hutchinson-Skilling trace estimator."""
 
-  def div_fn(x, t, eps):
+  def div_fn(x, t, eps, class_labels=None):
     with torch.enable_grad():
       x.requires_grad_(True)
-      fn_eps = torch.sum(fn(x, t) * eps)
+      fn_eps = torch.sum(fn(x, t, class_labels) * eps)
       grad_fn_eps = torch.autograd.grad(fn_eps, x)[0]
     x.requires_grad_(False)
     return torch.sum(grad_fn_eps * eps, dim=tuple(range(1, len(x.shape))))
 
   return div_fn
 
+def to_flattened_numpy(x):
+  """Flatten a torch tensor `x` and convert it to numpy."""
+  return x.detach().cpu().numpy().reshape((-1,))
 
-def get_likelihood_fn(sde, inverse_scaler, hutchinson_type='Rademacher',
+
+def from_flattened_numpy(x, shape):
+  """Form a torch tensor with the given `shape` from a flattened numpy array `x`."""
+  return torch.from_numpy(x.reshape(shape))
+
+def get_likelihood_fn(MODEL, hutchinson_type='Rademacher',
                       rtol=1e-5, atol=1e-5, method='RK45', eps=1e-5):
   """Create a function to compute the unbiased log-likelihood estimate of a given data point.
 
@@ -56,17 +43,23 @@ def get_likelihood_fn(sde, inverse_scaler, hutchinson_type='Rademacher',
       the latent code, and the number of function evaluations cost by computation.
   """
 
-  def drift_fn(model, x, t):
+  def prior_logp(self, z):
+    shape = z.shape
+    N = np.prod(shape[1:])
+    return -N / 2. * np.log(2 * np.pi * self.sigma_max ** 2) - torch.sum(z ** 2, dim=(1, 2, 3)) / (2 * self.sigma_max ** 2)
+
+
+  def drift_fn(model, x, t, class_labels=None):
     """The drift function of the reverse-time SDE."""
-    score_fn = mutils.get_score_fn(sde, model, train=False, continuous=True)
-    # Probability flow ODE is a special case of Reverse SDE
-    rsde = sde.reverse(score_fn, probability_flow=True)
-    return rsde.sde(x, t)[0]
+    sigma = t
+    D_x = model(x, sigma, class_labels)
+    S_x = (D_x - x)/(sigma**2)
+    return S_x
 
-  def div_fn(model, x, t, noise):
-    return get_div_fn(lambda xx, tt: drift_fn(model, xx, tt))(x, t, noise)
+  def div_fn(model, x, t, noise, class_labels=None):
+    return get_div_fn(lambda xx, tt, class_labels: drift_fn(model, xx, tt, class_labels))(x, t, noise, class_labels)
 
-  def likelihood_fn(model, data):
+  def likelihood_fn(model, data, class_labels=None):
     """Compute an unbiased estimate to the log-likelihood in bits/dim.
 
     Args:
@@ -89,25 +82,28 @@ def get_likelihood_fn(sde, inverse_scaler, hutchinson_type='Rademacher',
         raise NotImplementedError(f"Hutchinson type {hutchinson_type} unknown.")
 
       def ode_func(t, x):
-        sample = mutils.from_flattened_numpy(x[:-shape[0]], shape).to(data.device).type(torch.float32)
+        sample = from_flattened_numpy(x[:-shape[0]], shape).to(data.device).type(torch.float32)
         vec_t = torch.ones(sample.shape[0], device=sample.device) * t
-        drift = mutils.to_flattened_numpy(drift_fn(model, sample, vec_t))
-        logp_grad = mutils.to_flattened_numpy(div_fn(model, sample, vec_t, epsilon))
+        drift = to_flattened_numpy(drift_fn(model, sample, vec_t, class_labels))
+        logp_grad = to_flattened_numpy(div_fn(model, sample, vec_t, epsilon, class_labels))
         return np.concatenate([drift, logp_grad], axis=0)
 
-      init = np.concatenate([mutils.to_flattened_numpy(data), np.zeros((shape[0],))], axis=0)
-      solution = integrate.solve_ivp(ode_func, (eps, sde.T), init, rtol=rtol, atol=atol, method=method)
-      nfe = solution.nfev
+      init = np.concatenate([to_flattened_numpy(data), np.zeros((shape[0],))], axis=0)
+      solution = integrate.solve_ivp(ode_func, (eps, MODEL.sigma_max), init, rtol=rtol, atol=atol, method=method)
+      #nfe = solution.nfev
       zp = solution.y[:, -1]
-      z = mutils.from_flattened_numpy(zp[:-shape[0]], shape).to(data.device).type(torch.float32)
-      delta_logp = mutils.from_flattened_numpy(zp[-shape[0]:], (shape[0],)).to(data.device).type(torch.float32)
-      prior_logp = sde.prior_logp(z)
-      bpd = -(prior_logp + delta_logp) / np.log(2)
-      N = np.prod(shape[1:])
-      bpd = bpd / N
+      z = from_flattened_numpy(zp[:-shape[0]], shape).to(data.device).type(torch.float32)
+      delta_logp = from_flattened_numpy(zp[-shape[0]:], (shape[0],)).to(data.device).type(torch.float32)
+            
+      prior_logp = prior_logp(z)
+
+      post_logp = prior_logp + delta_logp
+      #bpd = -(prior_logp + delta_logp) / np.log(2)
+      #N = np.prod(shape[1:])
+      #bpd = bpd / N
       # A hack to convert log-likelihoods to bits/dim
-      offset = 7. - inverse_scaler(-1.)
-      bpd = bpd + offset
-      return bpd, z, nfe
+      #offset = 7. - inverse_scaler(-1.)
+      #bpd = bpd + offset
+      return zp, post_logp #bpd, z, nfe
 
   return likelihood_fn
