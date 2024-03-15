@@ -96,7 +96,7 @@ class QGSamplesDataset(torch.utils.data.Dataset):
     
 
 class NWPDataset(torch.utils.data.Dataset):
-    def __init__(self, data_path, n_val,  device):
+    def __init__(self, data_path, n_val, spacing, device):
         """
         Custom Dataset for loading QG samples lazily.
 
@@ -114,9 +114,15 @@ class NWPDataset(torch.utils.data.Dataset):
         self.n_val = n_val
         self.kmax=150
         self.total_rows, self.total_columns = self._calculate_dimensions()
+        
+        self.spacing = spacing
+        self.indices = self._generate_indices()
 
         self.mmap = self.create_mmap()
 
+    def _generate_indices(self):
+        return np.arange(0, self.total_rows)[::self.spacing]
+    
     def _calculate_dimensions(self):
         total_rows = self.n_val - self.kmax
         total_columns = 4225 
@@ -125,12 +131,12 @@ class NWPDataset(torch.utils.data.Dataset):
     def create_mmap(self):
         return np.memmap(self.data_path, dtype=self.data_dtype, mode='r', shape=(self.total_rows, self.total_columns))
 
-    
     def __len__(self):
         # Return the length of the dataset
         return self.total_rows
 
     def __getitem__(self, idx):
+        idx = self.indices[idx]
 
         # Access the specific samples directly from the memory-mapped array
         # This operation does not load the entire dataset into memory
