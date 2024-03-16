@@ -133,7 +133,7 @@ class NWPDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         # Return the length of the dataset
-        return self.total_rows
+        return self.indices.shape[0]
 
     def __getitem__(self, idx):
         idx = self.indices[idx]
