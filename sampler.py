@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 def edm_sampler(
-    net, latents, class_labels=None, randn_like=torch.randn_like,
+    net, latents, class_labels=None, time_labels=None, randn_like=torch.randn_like,
     num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
     S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
 ):
@@ -27,13 +27,13 @@ def edm_sampler(
         x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
 
         # Euler step.
-        denoised = net(x_hat, t_hat, class_labels)#.to(torch.float64)
+        denoised = net(x_hat, t_hat, class_labels, time_labels)#.to(torch.float64)
         d_cur = (x_hat - denoised) / t_hat
         x_next = x_hat + (t_next - t_hat) * d_cur
 
         # Apply 2nd order correction.
         if i < num_steps - 1:
-            denoised = net(x_next, t_next, class_labels)#.to(torch.float64)
+            denoised = net(x_next, t_next, class_labels, time_labels)#.to(torch.float64)
             d_prime = (x_next - denoised) / t_next
             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
         
@@ -78,14 +78,14 @@ def complete_edm_sampler(
             d_prime = (x_next - denoised) / t_next
             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
         
-       xs.append(x_next)
+        xs.append(x_next)
 
-    return x_next torch.stack(xs) #xs[::-1])
+    return x_next, torch.stack(xs) #xs[::-1])
 
-def drift_fn(model, x, t, class_labels=None):
+def drift_fn(model, x, t, class_labels=None, time_labels=None):
     """The drift function of the reverse-time SDE."""
     sigma = t
-    D_x = model(x, sigma, class_labels)
+    D_x = model(x, sigma, class_labels, time_labels)
     S_x = (D_x - x)/(sigma**2)
     return S_x
 
@@ -110,8 +110,8 @@ def get_div_fn(fn):
   return div_fn
 
 
-def div_fn(model, x, t, noise, class_labels=None):
-    return get_div_fn(lambda xx, tt, class_labels: drift_fn(model, xx, tt, class_labels))(x, t, noise, class_labels)
+def div_fn(model, x, t, noise, class_labels=None, time_labels=None):
+    return get_div_fn(lambda xx, tt, class_labels, time_labels: drift_fn(model, xx, tt, class_labels, time_labels))(x, t, noise, class_labels, time_labels)
 
 
 def likelihood_sampler(

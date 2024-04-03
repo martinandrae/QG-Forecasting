@@ -120,7 +120,7 @@ class SimpleUnet(nn.Module):
 # ------------------------------------------------------------------------------
 # Preconditioner
 class GCPrecond(torch.nn.Module):
-    def __init__(self, sigma_data=1, sigma_min=0.02, sigma_max=88, filters=128, model = 'ncsnpp', img_channels=1, img_resolution = 65, time_emb_dim=16, isLatent=True):
+    def __init__(self, sigma_data=1, sigma_min=0.02, sigma_max=88, filters=128, model = 'ncsnpp', img_channels=1, img_resolution = 65, time_emb_dim=128, isLatent=True, time_emb=0):
         super(GCPrecond, self).__init__()
         self.sigma_data = sigma_data
         self.sigma_min = sigma_min
@@ -133,11 +133,15 @@ class GCPrecond(torch.nn.Module):
             self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
                                 embedding_type='positional', encoder_type='standard', decoder_type='standard', \
                                 channel_mult_noise=1, resample_filter=[1,1], model_channels=filters, channel_mult=[2,2,2],
-                                num_blocks=4, )
+                                num_blocks=4,  time_emb=time_emb)
         elif model == 'ncsnpp':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
+            self.model = TimeSongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
                                 embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
-                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2])
+                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
+                                time_emb=time_emb)
+        elif model == 'simple':
+            self.model = SimpleUnet(filters=filters, no_downsamples=2, image_channels=img_channels, time_emb_dim=time_emb_dim, isLatent=isLatent)
+        
         else:
             raise ValueError('Model not recognized')
     
@@ -145,7 +149,7 @@ class GCPrecond(torch.nn.Module):
         #self.model = DhariwalUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, model_channels=192, channel_mult=[1,2,3,4])
         #self.model = CuboidTransformerUNet(input_shape=(img_channels, img_resolution, img_resolution, batch_size), target_shape=(1, img_resolution, img_resolution, batch_size))
         
-    def forward(self, x, sigma, class_labels=None):
+    def forward(self, x, sigma, class_labels=None, time_labels=None):
         dtype = torch.float32
         x = x.to(dtype) # EMA does this
         sigma = sigma.to(dtype).reshape(-1, 1, 1, 1) # EMA does this
@@ -156,7 +160,7 @@ class GCPrecond(torch.nn.Module):
         c_in = 1 / (self.sigma_data ** 2 + sigma ** 2).sqrt()
         c_noise = sigma.log() / 4
 
-        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels)
+        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels, time_labels)
         assert F_x.dtype == dtype
         D_x = c_skip * x + c_out * F_x.to(dtype)
         
@@ -169,13 +173,14 @@ class GCPrecond(torch.nn.Module):
 # ------------------------------------------------------------------------------
 # Loss function
 class GCLoss:
-    def __init__(self, sigma_min=0.02, sigma_max=88, rho=7, sigma_data=1):
+    def __init__(self, sigma_min=0.02, sigma_max=88, rho=7, sigma_data=1, time_noise=0.25):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.rho = rho
         self.sigma_data = sigma_data
+        self.time_noise = time_noise
     
-    def __call__(self, model, images, class_labels=None):
+    def __call__(self, model, images, class_labels=None, time_labels=None):
         # Sample from F inverse
         rnd_uniform = torch.rand([images.shape[0], 1, 1, 1], device=images.device)
         rho_inv = 1 / self.rho
@@ -191,10 +196,15 @@ class GCLoss:
         noise = torch.randn_like(images)
         noisy_images = images + sigma * noise
 
+        # Time
+        time_labels = time_labels.to(images.device) + torch.randn_like(time_labels, device=images.device, dtype=torch.float32) * self.time_noise
+
         # Forward pass
-        denoised_images = model(noisy_images, sigma, class_labels)
+        denoised_images = model(noisy_images, sigma, class_labels, time_labels)
 
         # Compute loss
         loss = weight * ((denoised_images - images) ** 2)
 
         return loss.sum().mul(1/images.shape[0])
+    
+    

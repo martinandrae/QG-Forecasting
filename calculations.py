@@ -7,15 +7,9 @@ def calculate_RMSE(predicted, truth):
     dims_to_include = list(range(2, predicted.dim()))
     return torch.sqrt(torch.mean((predicted - truth) ** 2, dim=dims_to_include)).cpu().detach().numpy()
 
-def calculate_climatology(selected_loader):
-    mean = 0
-    count = 0
-    with torch.no_grad():
-        for _, current in tqdm(selected_loader):
-            mean += torch.sum(current, dim=0)
-            count += current.size(0)
-    mean = mean / count
-    return mean
+def calculate_MAE(predicted, truth):
+    dims_to_include = list(range(2, predicted.dim()))
+    return torch.mean(torch.abs(predicted - truth), dim=dims_to_include).cpu().detach().numpy()
 
 def calculate_skill_and_spread_score(forecast, truth):
     ens_mean = forecast.mean(dim=0)
