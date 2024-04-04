@@ -197,8 +197,11 @@ class GCLoss:
         noisy_images = images + sigma * noise
 
         # Time
-        time_labels = time_labels.to(images.device) + torch.randn_like(time_labels, device=images.device, dtype=torch.float32) * self.time_noise
-
+        eps = 0
+        if self.time_noise > 0:
+            eps =  torch.randn_like(time_labels, device=images.device, dtype=torch.float32) * self.time_noise
+        time_labels = time_labels.to(images.device) + eps
+            
         # Forward pass
         denoised_images = model(noisy_images, sigma, class_labels, time_labels)
 

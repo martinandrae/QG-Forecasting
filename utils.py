@@ -234,8 +234,8 @@ class TimeSampleDataset(torch.utils.data.Dataset):
         Y_sample = (Y_sample - self.mean_data) / self.std_data
 
         # Convert to tensors before returning
-        X_sample = torch.tensor(X_sample, dtype=torch.float32).to(self.device)
-        Y_sample = torch.tensor(Y_sample, dtype=torch.float32).to(self.device)
+        X_sample = torch.tensor(X_sample, dtype=torch.float32)#.to(self.device)
+        Y_sample = torch.tensor(Y_sample, dtype=torch.float32)#.to(self.device)
 
         # View the samples as 2D images
         X_sample = X_sample.view(-1, 65, 65)
