@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch.utils.data import Sampler
 
 class QGSamplesDataset(torch.utils.data.Dataset):
     def __init__(self, data_path, mode, p_train, k, spinup, spacing, iterations, mean_data, std_data, device, transform=None):
@@ -242,3 +243,42 @@ class TimeSampleDataset(torch.utils.data.Dataset):
         Y_sample = Y_sample.view(-1, 65, 65)
 
         return X_sample, Y_sample, self.k
+    
+
+def update_k_per_batch(dataset, kmin, d):
+    new_k = kmin + d * np.random.randint(0, 1 + (dataset.kmax-kmin) // d)
+    dataset.set_k(new_k)
+
+class DynamicKBatchSampler(Sampler):
+    def __init__(self, dataset, batch_size, drop_last, k_update_callback, shuffle=False, kmin=50, d=1):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.shuffle = shuffle
+        self.k_update_callback = k_update_callback
+        self.indices = list(range(len(dataset)))
+        
+        self.kmin = kmin
+        self.d = d
+
+    def __iter__(self):
+        # Shuffle indices at the beginning of each epoch if required
+        if self.shuffle:
+            np.random.shuffle(self.indices)
+        
+        batch = []
+        for idx in self.indices:
+            if len(batch) == self.batch_size:
+                self.k_update_callback(self.dataset, self.kmin, self.d)  # Update `k` before yielding the batch
+                yield batch
+                batch = []
+            batch.append(idx)
+        if batch and not self.drop_last:
+            self.k_update_callback(self.dataset, self.kmin, self.d)  # Update `k` for the last batch if not dropping it
+            yield batch
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.dataset) // self.batch_size
+        else:
+            return (len(self.dataset) + self.batch_size - 1) // self.batch_size

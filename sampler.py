@@ -10,6 +10,8 @@ def edm_sampler(
     sigma_min = max(sigma_min, net.sigma_min)
     sigma_max = min(sigma_max, net.sigma_max)
 
+    time_labels = time_labels.to(torch.float32).to(latents.device)
+
     # Time step discretization.
     step_indices = torch.arange(num_steps, dtype=torch.float32, device=latents.device)
     t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
