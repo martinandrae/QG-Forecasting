@@ -136,6 +136,11 @@ class GCPrecond(torch.nn.Module):
                                 num_blocks=4,  time_emb=time_emb)
         elif model == 'ncsnpp':
             self.model = TimeSongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
+                                embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
+                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
+                                time_emb=time_emb, attn_resolutions=[])
+        elif model == 'ncsnppOriginal':
+            self.model = TimeSongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
                                 embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
                                 channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
                                 time_emb=time_emb)
