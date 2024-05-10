@@ -1,11 +1,8 @@
 {
   "name": "ncsnpp-f32-k50",
-  "model": "ncsnpp",
-  "k": 50,
   "filters": 32,
   "wd": 0.1,
   "lr": 0.001,
   "num_epochs": 32,
-  "spacing": 1,
-  "iterations": 2101000
+  "spacing": 1
 }
