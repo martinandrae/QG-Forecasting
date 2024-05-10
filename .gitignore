@@ -1,0 +1,5 @@
+slurm*
+*.pth
+*.pdf
+*.csv
+__pycache__

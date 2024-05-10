@@ -235,11 +235,12 @@ class NWPDataset(torch.utils.data.Dataset):
         
         self.n_val = n_val
         self.max_lead_time = 150
+        self.sz = 65
+        
         self.total_rows, self.total_columns = self._compute_dimensions()
         
         self.spacing = spacing
         self.indices = self._generate_indices()
-        self.sz = 65
 
         self.mmap = self.create_mmap()
 
