@@ -4,7 +4,7 @@ class Autoencoder(nn.Module):
     """
     Convolutional Autoencoder for encoding and decoding images.
     """
-    def __init__(self, filters, no_latent_channels=2, no_downsamples=3, image_size = 65, input_channels = 1, activation=nn.ReLU(True)):
+    def __init__(self, filters, no_latent_channels=2, no_downsamples=3, image_size = 65, input_channels = 1, activation=nn.ReLU(True), start_kernel=4):
         """
         Initializes the model with the specified configuration.
         
@@ -22,7 +22,7 @@ class Autoencoder(nn.Module):
         self.no_latent_channels = no_latent_channels
         self.activation = activation
 
-        kernel_size = 4
+        kernel_size = start_kernel
 
         dim = self.filters
 

@@ -81,7 +81,7 @@ mean_data = 0.003394413273781538  # Mean of the dataset, for normalization
 std_data = 9.174626350402832  # Standard deviation of the dataset, for normalization
 
 from utils import *
-from autoencoder import Autoencoder
+from autoencoder_networks import Autoencoder
 
 def train():
     # Setup for training and validation

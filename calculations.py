@@ -47,8 +47,8 @@ def calculate_covtrace(forecast):
 
     return covtrace
 
-def calculate_psnr(pred, truth):
-    mse = torch.mean((truth - pred)**2, axis = (2,3,4))
-    max_truth,_ = truth.view(truth.shape[0],-1).max(dim=1)
-    psnr = torch.mean(20 * torch.log10(max_truth/mse), axis=0)
+def calculate_psnr(forecast, truth):
+    mse = torch.mean((truth - forecast)**2, axis = (2,3,4))
+    max_truth, _ = (truth**2).view(truth.shape[0],-1).max(dim=1)
+    psnr = torch.mean(10 * torch.log10(max_truth/mse), axis=0)
     return psnr.cpu().detach().numpy()
