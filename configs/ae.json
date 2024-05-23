@@ -1,0 +1,11 @@
+{
+  "name": "autoencoder",
+  "model": "deep",
+  "loss_function": "WMSE",
+  "filters": 32,
+  "wd": 0.1,
+  "lr": 0.001,
+  "num_epochs": 30,
+  "spacing": 1,
+  "l1_penalty": 0.00001
+}

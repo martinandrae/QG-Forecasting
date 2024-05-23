@@ -38,18 +38,19 @@ class GCLoss:
 # Area weighted loss function from the codebase 
 # diffusion-models-for-weather-prediction
 class WeightedMSELoss:
-    def __init__(self, weights):
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    def __init__(self, weights, device):
         self.weights = torch.tensor(weights, device=device)   
 
     def loss_fn(self, input: torch.tensor, target: torch.tensor):
         return (self.weights * (input - target) ** 2).mean()
+    
+    def diff(self, input: torch.tensor, target: torch.tensor):
+        return (self.weights * (input - target) ** 2)
 
 class AreaWeightedMSELoss(WeightedMSELoss):
-    def __init__(self, lat, lon):
-        super().__init__(weights=comp_area_weights_simple(lat, lon))
+    def __init__(self, lat, lon, device):
+        super().__init__(weights=comp_area_weights_simple(lat, lon), device=device)
     
-
 
 def comp_area_weights_simple(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     """An easier way to calculate the (already normalized) area weights.
