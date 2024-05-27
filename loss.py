@@ -37,32 +37,69 @@ class GCLoss:
 #----------------------------------------------------------------------------
 # Area weighted loss function from the codebase 
 # diffusion-models-for-weather-prediction
-class WeightedMSELoss:
-    def __init__(self, weights, device):
-        self.weights = torch.tensor(weights, device=device)   
 
-    def loss_fn(self, input: torch.tensor, target: torch.tensor):
-        return (self.weights * (input - target) ** 2).mean()
-    
+class calculate_WeightedRMSE:
+    def __init__(self, weights, device):
+        self.weights = torch.tensor(weights, device=device, dtype=torch.float32)   
+
     def diff(self, input: torch.tensor, target: torch.tensor):
         return (self.weights * (input - target) ** 2)
+    
+    def loss_fn(self, input: torch.tensor, target: torch.tensor):
+        return self.diff(input, target).mean().sqrt()
 
-class AreaWeightedMSELoss(WeightedMSELoss):
+
+class calculate_AreaWeightedRMSE(calculate_WeightedRMSE):
     def __init__(self, lat, lon, device):
         super().__init__(weights=comp_area_weights_simple(lat, lon), device=device)
     
 
+# ----
+
 def comp_area_weights_simple(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
-    """An easier way to calculate the (already normalized) area weights.
+    """Calculate the normalized area weights.
 
     Args:
         lat (np.ndarray): Array of latitudes of grid center points
-        lon (np.ndarray): Array of lontigutes of grid center points
+        lon (np.ndarray): Array of longitudes of grid center points
 
     Returns:
-        np.ndarray: 2d array of relative area sizes.
+        np.ndarray: 2D array of relative area sizes.
     """
-    area_weights = np.cos(lat * (2 * np.pi) / 360)
-    area_weights = area_weights.reshape(-1, 1).repeat(lon.shape[0],axis=-1)
-    area_weights = (lat.shape[0]*lon.shape[0] / np.sum(area_weights)) * area_weights
+    area_weights = np.cos(lat * np.pi / 180).reshape(-1, 1)
+    area_weights = np.repeat(area_weights, lon.size, axis=1)
+    area_weights *= (lat.size * lon.size / np.sum(area_weights))
     return area_weights
+
+class WeightedLoss(torch.nn.Module):
+    def __init__(self, weights, device):
+        super().__init__()
+        self.weights = torch.tensor(weights, device=device, dtype=torch.float32)
+
+    def forward(self, input, target):
+        raise NotImplementedError("Must be implemented by subclasses")
+
+class WeightedMAELoss(WeightedLoss):
+    def forward(self, input, target):
+        return torch.mean(self.weights * torch.abs(input - target))
+
+class WeightedMSELoss(WeightedLoss):
+    def forward(self, input, target):
+        return torch.mean(self.weights * (input - target) ** 2)
+
+class AreaWeightedLoss(torch.nn.Module):
+    def __init__(self, lat, lon, device, loss_cls):
+        super().__init__()
+        weights = comp_area_weights_simple(lat, lon)
+        self.loss_instance = loss_cls(weights, device)
+
+    def forward(self, input, target):
+        return self.loss_instance(input, target)
+
+class AreaWeightedMAELoss(AreaWeightedLoss):
+    def __init__(self, lat, lon, device):
+        super().__init__(lat, lon, device, WeightedMAELoss)
+
+class AreaWeightedMSELoss(AreaWeightedLoss):
+    def __init__(self, lat, lon, device):
+        super().__init__(lat, lon, device, WeightedMSELoss)

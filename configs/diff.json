@@ -1,8 +1,9 @@
 {
-  "name": "ncsnpp-f32-k50",
+  "name": "diffusion",
+  "batch_size": 256,
   "filters": 32,
   "wd": 0.1,
   "lr": 0.001,
-  "num_epochs": 32,
+  "num_epochs": 30,
   "spacing": 1
 }

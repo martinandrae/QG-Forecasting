@@ -42,24 +42,29 @@ config = load_config(config_path)
 name        = config['name']
 model_choice = config['model']
 loss_function = config['loss_function']
+
+batch_size = config['batch_size']
 filters     = config['filters']
 wd          = config['wd']
 lr          = config['lr']
 num_epochs  = config['num_epochs']
 spacing     = config['spacing']
 l1_penalty = config['l1_penalty']
+no_latent_channels = config['no_latent_channels']
+optimizer_choice = config['optimizer']
 
 # --------------------------
 
 iterations = 2101000
 # Constants and configurations
-on_remote = False  # Flag to switch between remote and local paths
+on_remote = True  # Flag to switch between remote and local paths
 
 # Path to the dataset, changes based on the execution environment
-data_path = Path(f'/nobackup/smhid20/users/sm_maran/dpr_data/simulations/QG_samples_SUBS_{iterations}.npy') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/data/QG_samples_SUBS_{iterations}.npy')
 
-date = '2024-05-23'  # Date of the experiment
-result_path = Path(f'/nobackup/smhid20/users/sm_maran/results/{date}/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
+date = '2024-05-24'  # Date of the experiment
+result_path = Path(f'/proj/berzelius-2022-164/users/sm_maran/results/{date}/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
+
+# Path(f'/nobackup/smhid20/users/sm_maran/results/{date}/{name}/') 
 
 # Check if the directory exists, and create it if it doesn't
 if not result_path.exists():
@@ -71,48 +76,48 @@ shutil.copy(config_path, result_path / "config.json")
 
 # ---------------------------
 
-""" 
-QG
-"""
+qg = False
 
-# QG Dataset
+if qg:
+    """ 
+    QG
+    """
 
-batch_size = 64 # 256 Largest possible batch size that fits on the GPU w.f32
+    # QG Dataset
 
-mean_data = 0.003394413273781538
-std_data = 9.174626350402832
-norm_factors = (mean_data, std_data)
+    mean_data = 0.003394413273781538
+    std_data = 9.174626350402832
+    norm_factors = (mean_data, std_data)
 
-iterations = 2101000
-spinup = 1001
-p_train = 0.8
+    iterations = 2101000
+    spinup = 1001
+    p_train = 0.8
 
-n_samples = iterations+1
-n_train = int(np.round(p_train * (n_samples - spinup)))  # Number of training samples
-n_val = int(np.round((1 - p_train) / 2 * (n_samples - spinup)))  # Number of validation samples
-sample_counts = (n_samples, n_train, n_val)
+    n_samples = iterations+1
+    n_train = int(np.round(p_train * (n_samples - spinup)))  # Number of training samples
+    n_val = int(np.round((1 - p_train) / 2 * (n_samples - spinup)))  # Number of validation samples
+    sample_counts = (n_samples, n_train, n_val)
 
-on_remote = False
-fname= f'QG_samples_SUBS_{iterations}.npy'
-subd = 'C:/Users/svart/Desktop/MEX/data/'
-if on_remote:
-    subd = '/nobackup/smhid20/users/sm_maran/dpr_data/simulations'
-dataset_path = Path(f'{subd}/{fname}')
+    fname= f'QG_samples_SUBS_{iterations}.npy'
+    subd = 'C:/Users/svart/Desktop/MEX/data/'
+    if on_remote:
+        subd = '/nobackup/smhid20/users/sm_maran/dpr_data/simulations'
+    dataset_path = Path(f'{subd}/{fname}')
 
-grid_dimensions = (65, 65)
-max_lead_time = 150
+    grid_dimensions = (65, 65)
+    max_lead_time = 150
 
-QG_kwargs = {
-            'dataset_path':     dataset_path,
-            'sample_counts':    sample_counts,
-            'grid_dimensions':  grid_dimensions,
-            'max_lead_time':    max_lead_time,
-            'norm_factors':     norm_factors,
-            'device':           device,
-            'spinup':           spinup,
-            'spacing':          spacing,
-            'dtype':            'float32'
-            }
+    QG_kwargs = {
+                'dataset_path':     dataset_path,
+                'sample_counts':    sample_counts,
+                'grid_dimensions':  grid_dimensions,
+                'max_lead_time':    max_lead_time,
+                'norm_factors':     norm_factors,
+                'device':           device,
+                'spinup':           spinup,
+                'spacing':          spacing,
+                'dtype':            'float32'
+                }
 # WB
 # ---------------------------
 
@@ -122,11 +127,10 @@ WB
 
 # WB Dataset
 
-batch_size = 32 # 256 Largest possible batch size that fits on the GPU w.f32
 offset = 2**7
 
-mean_data = 0.003394413273781538
-std_data = 9.174626350402832
+mean_data = 54112.887 
+std_data = 3354.9524
 norm_factors = (mean_data, std_data)
 
 spinup = 0
@@ -136,7 +140,6 @@ n_val = sum((ti.year >= 2016) & (ti.year <= 2017))
 n_samples = len(ti)
 sample_counts = (n_samples, n_train, n_val)
 
-on_remote = False
 fname= 'geopotential_500hPa_1979-2018_5.625deg.npy'
 subd = 'C:/Users/svart/Desktop/MEX/data/'
 if on_remote:
@@ -150,8 +153,6 @@ max_lead_time = 240
 fnm_ll = f'{subd}/latlon_500hPa_1979-2018_5.625deg.npz'
 buf = np.load(fnm_ll)
 lat, lon = buf['arr_0'], buf['arr_1']
-
-wmse = AreaWeightedMSELoss(lat, lon, device).loss_fn
 
 
 WB_kwargs = {
@@ -186,23 +187,31 @@ def train():
     Model Loading
     """
     if model_choice == "autoencoder":
-        model = Autoencoder(filters= filters, no_latent_channels=1, no_downsamples=2, start_kernel=3)
+        model = Autoencoder(filters= filters, no_latent_channels=no_latent_channels, no_downsamples=1, start_kernel=3)
     elif model_choice== "deep":
-        model = DeepAutoencoder(filters= filters, no_latent_channels=1, no_downsamples=2, start_kernel=3)
+        model = DeepAutoencoder(filters= filters, no_latent_channels=no_latent_channels, no_downsamples=1, start_kernel=3)
 
     if loss_function == "MSE":
         loss_fn = nn.MSELoss()
     elif loss_function == "L1":
         loss_fn = nn.L1Loss()
     elif loss_function == "WMSE":
-        loss_fn = wmse
+        loss_fn = AreaWeightedMSELoss(lat, lon, device)
+    elif loss_function == "WMAE":
+        loss_fn = AreaWeightedMAELoss(lat, lon, device)
     else:
         raise Exception("Loss function not found")
 
-    print("Num params: ", sum(p.numel() for p in model.parameters()))
+    print("Num params: ", sum(p.numel() for p in model.parameters()), flush=True)
     model.to(device)
 
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
+    if optimizer_choice == "AdamW":
+        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
+    elif optimizer_choice == "SGD":
+        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=wd)
+    else:
+        raise Exception("Optimizer not found")
+    
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.001, end_factor=1.0, total_iters=1000)
 
@@ -224,7 +233,7 @@ def train():
         model.train()  # Set model to training mode
         total_train_loss = 0
 
-        for previous, _, _ in tqdm(train_loader):
+        for previous, _, _ in (train_loader):
             previous = previous.to(device)
             
             optimizer.zero_grad()
@@ -247,7 +256,7 @@ def train():
         model.eval()
         total_val_loss = 0
         with torch.no_grad():
-            for previous, _, _ in tqdm(val_loader):
+            for previous, _, _ in (val_loader):
                 previous = previous.to(device)
                         
                 reconstruction, latent = model(previous)
@@ -277,8 +286,8 @@ def train():
             writer = csv.writer(file)
             writer.writerow([epoch+1, avg_train_loss, avg_val_loss])
         
-        print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}')
+        print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}', flush=True)
 
-    torch.save(model.state_dict(), result_path/f'final_model.pth')
+        torch.save(model.state_dict(), result_path/f'final_model.pth')
 
 train()

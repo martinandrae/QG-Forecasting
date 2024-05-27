@@ -13,9 +13,11 @@ import json  # Import json library
 import argparse
 import shutil
 from tqdm import tqdm
+import pandas as pd
+import datetime
 
 from utils import *
-from autoencoder_networks import Autoencoder
+from autoencoder_networks import *
 from loss import *
 
 
@@ -43,24 +45,26 @@ filters     = config['filters']
 num_epochs  = config['num_epochs']
 wd          = config['wd']
 lr          = config['lr']
+batch_size = config['batch_size']
+
+
 
 # --------------------------
 
 iterations = 2101000
 # Constants and configurations
-on_remote = False  # Flag to switch between remote and local paths
-autoencoder_date = '2024-02-21'  # Date of the experiment
+on_remote = True  # Flag to switch between remote and local paths
+autoencoder_date = '2024-05-24'  # Date of the experiment
 
-autoencoder_model = 'ae-2ds-32f-1l-150e-L1-0wd-0.00001l1'
-pth = f'/nobackup/smhid20/users/sm_maran/results/{autoencoder_date}' if on_remote else f'C:/Users/svart/Desktop/MEX/results/{autoencoder_date}'
+autoencoder_model = 'autoencoder-f4-f64'
+pth = f'/proj/berzelius-2022-164/users/sm_maran/results/{autoencoder_date}' if on_remote else f'C:/Users/svart/Desktop/MEX/results/{autoencoder_date}'
 
 autoencoder_path = Path(f'{pth}/{autoencoder_model}') if on_remote else Path(f'{pth}/{autoencoder_model}')
 
 # Path to the dataset, changes based on the execution environment
-data_path = Path(f'/nobackup/smhid20/users/sm_maran/dpr_data/simulations/QG_samples_SUBS_{iterations}.npy') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/data/QG_samples_SUBS_{iterations}.npy')
 
-date = '2024-05-10'  # Date of the experiment
-result_path = Path(f'/nobackup/smhid20/users/sm_maran/results/{date}/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
+date = '2024-05-26'  # Date of the experiment
+result_path = Path(f'/proj/berzelius-2022-164/users/sm_maran/results/{date}/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
 
 # Check if the directory exists, and create it if it doesn't
 if not result_path.exists():
@@ -72,7 +76,7 @@ shutil.copy(config_path, result_path / "config.json")
 
 
 # Note that this needs to be precalculated
-std_path = f'{autoencoder_path}/stds.txt'
+std_path = f'{autoencoder_path}/WB_stds.txt'
 precomputed_std = torch.tensor(np.loadtxt(std_path,delimiter=' ')[:,1], dtype=torch.float32).to(device)
 def residual_scaling(x):
     return precomputed_std[x.to(dtype=int)-1]
@@ -84,8 +88,6 @@ QG
 """
 
 # QG Dataset
-
-batch_size = 64 # 256 Largest possible batch size that fits on the GPU w.f32
 
 mean_data = 0.003394413273781538
 std_data = 9.174626350402832
@@ -100,7 +102,6 @@ n_train = int(np.round(p_train * (n_samples - spinup)))  # Number of training sa
 n_val = int(np.round((1 - p_train) / 2 * (n_samples - spinup)))  # Number of validation samples
 sample_counts = (n_samples, n_train, n_val)
 
-on_remote = False
 fname= f'QG_samples_SUBS_{iterations}.npy'
 subd = 'C:/Users/svart/Desktop/MEX/data/'
 if on_remote:
@@ -123,14 +124,64 @@ QG_kwargs = {
             }
 
 
-# Way to load a dataset with lead time following a distribution given by update_k_per_batch
-update_k_per_batch = get_uniform_k_dist_fn(kmin=1, kmax=150, d=1)
+""" 
+WB
+"""
 
-train_time_dataset = QGDataset(lead_time=max_lead_time, dataset_mode='train', **QG_kwargs)
+# WB Dataset
+
+offset = 2**7
+
+mean_data = 54112.887 
+std_data = 3354.9524
+norm_factors = (mean_data, std_data)
+
+spinup = 0
+ti = pd.date_range(datetime.datetime(1979,1,1,0), datetime.datetime(2018,12,31,23), freq='1h')
+n_train = sum(ti.year <= 2015)
+n_val = sum((ti.year >= 2016) & (ti.year <= 2017))
+n_samples = len(ti)
+sample_counts = (n_samples, n_train, n_val)
+
+fname= 'geopotential_500hPa_1979-2018_5.625deg.npy'
+subd = 'C:/Users/svart/Desktop/MEX/data/'
+if on_remote:
+    #subd = '/nobackup/smhid20/users/sm_maran/dpr_data/simulations'
+    subd = '/proj/berzelius-2022-164/users/sm_maran/data/wb'
+dataset_path = Path(f'{subd}/{fname}')
+
+grid_dimensions = (32, 64)
+max_lead_time = 240
+
+fnm_ll = f'{subd}/latlon_500hPa_1979-2018_5.625deg.npz'
+buf = np.load(fnm_ll)
+lat, lon = buf['arr_0'], buf['arr_1']
+
+
+WB_kwargs = {
+            'dataset_path':     dataset_path,
+            'sample_counts':    sample_counts,
+            'grid_dimensions':  grid_dimensions,
+            'max_lead_time':    max_lead_time,
+            'norm_factors':     norm_factors,
+            'device':           device,
+            'spinup':           spinup,
+            'spacing':          spacing,
+            'dtype':            'float32',
+            'offset':           offset
+            }
+
+kwargs = WB_kwargs
+
+
+# Way to load a dataset with lead time following a distribution given by update_k_per_batch
+update_k_per_batch = get_uniform_k_dist_fn(kmin=1, kmax=max_lead_time, d=1)
+
+train_time_dataset = QGDataset(lead_time=max_lead_time, dataset_mode='train', **kwargs)
 train_batch_sampler = DynamicKBatchSampler(train_time_dataset, batch_size=batch_size, drop_last=True, k_update_callback=update_k_per_batch, shuffle=True)
 train_time_loader = DataLoader(train_time_dataset, batch_sampler=train_batch_sampler)
 
-val_time_dataset = QGDataset(lead_time=max_lead_time, dataset_mode='val', **QG_kwargs)
+val_time_dataset = QGDataset(lead_time=max_lead_time, dataset_mode='val', **kwargs)
 val_batch_sampler = DynamicKBatchSampler(val_time_dataset, batch_size=batch_size, drop_last=True, k_update_callback=update_k_per_batch, shuffle=True)
 val_time_loader = DataLoader(val_time_dataset, batch_sampler=val_batch_sampler)
 
@@ -147,17 +198,19 @@ def train():
 
     # Extract the desired parameters
     ae_filters = parameters['filters']
-    latent_dim = parameters['latent_dim']
-    ae_no_downsamples = parameters['no_downsamples']
+    if 'no_latent_channels' in parameters.keys():
+        latent_dim = parameters['no_latent_channels']
+    else:
+        latent_dim = 1
 
     # Create an instance of the ConvolutionalAutoencoder class
-    autoencoder = Autoencoder(filters= ae_filters, no_latent_channels=latent_dim, no_downsamples=ae_no_downsamples)
+    autoencoder = DeepAutoencoder(filters= ae_filters, no_latent_channels=latent_dim, no_downsamples=1, start_kernel=3)
 
     autoencoder.load_state_dict(saved_model)
 
     autoencoder.to(device)
     autoencoder.eval()
-    print("Autoencoder loaded successfully!")
+    print("Autoencoder loaded successfully!", flush=True)
 
     #----------
 
@@ -165,10 +218,10 @@ def train():
     Model Loading
     """
 
-    model = EDMPrecond(filters=filters, img_channels=2, img_resolution = 16, time_emb=1, model_type='standard', sigma_data=1, sigma_min=0.02, sigma_max=88)
+    model = EDMPrecond(filters=filters, img_channels=2*latent_dim, img_resolution = 16, time_emb=1, model_type='standard', sigma_data=1, sigma_min=0.02, sigma_max=88)
     loss_fn = GCLoss()
 
-    print("Num params: ", sum(p.numel() for p in model.parameters()))
+    print("Num params: ", sum(p.numel() for p in model.parameters()), flush=True)
     model.to(device)
 
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
@@ -193,7 +246,7 @@ def train():
         model.train()  # Set model to training mode
         total_train_loss = 0
 
-        for previous, current, time_label in tqdm(train_time_loader):
+        for previous, current, time_label in (train_time_loader):
             current = current.to(device)
             previous = previous.to(device)
             time_label = time_label.to(device)
@@ -220,7 +273,7 @@ def train():
         model.eval()
         total_val_loss = 0
         with torch.no_grad():
-            for previous, current, time_label in tqdm(val_time_loader):
+            for previous, current, time_label in (val_time_loader):
                 current = current.to(device)
                 previous = previous.to(device)
                 time_label = time_label.to(device)
@@ -251,8 +304,8 @@ def train():
             writer = csv.writer(file)
             writer.writerow([epoch+1, avg_train_loss, avg_val_loss])
         
-        print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}')
+        print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}', flush=True)
 
-    torch.save(model.state_dict(), result_path/f'final_model.pth')
+        torch.save(model.state_dict(), result_path/f'final_model.pth')
 
 train()
