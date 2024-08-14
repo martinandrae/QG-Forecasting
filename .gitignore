@@ -3,3 +3,5 @@ slurm*
 *.pdf
 *.csv
 __pycache__
+results
+figures

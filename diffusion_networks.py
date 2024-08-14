@@ -47,6 +47,7 @@ class Conv2d(torch.nn.Module):
     def __init__(self,
         in_channels, out_channels, kernel, bias=True, up=False, down=False,
         resample_filter=[1,1], fused_resample=False, init_mode='kaiming_normal', init_weight=1, init_bias=0,
+        circular_padding=True,
     ):
         assert not (up and down)
         super().__init__()
@@ -62,6 +63,16 @@ class Conv2d(torch.nn.Module):
         f = f.ger(f).unsqueeze(0).unsqueeze(1) / f.sum().square()
         self.register_buffer('resample_filter', f if up or down else None)
 
+        self.circular_padding = circular_padding
+    
+    def circ_pad(self, x, pad):
+        if self.circular_padding:
+            pad_func = torch.nn.CircularPad2d((pad, pad, 0, 0))
+        else:
+            pad_func = torch.nn.ConstantPad2d((pad, pad, 0, 0), 0)
+
+        return pad_func(x) if pad else x
+
     def forward(self, x):
         w = self.weight.to(x.dtype) if self.weight is not None else None
         b = self.bias.to(x.dtype) if self.bias is not None else None
@@ -70,18 +81,28 @@ class Conv2d(torch.nn.Module):
         f_pad = (f.shape[-1] - 1) // 2 if f is not None else 0
 
         if self.fused_resample and self.up and w is not None:
-            x = torch.nn.functional.conv_transpose2d(x, f.mul(4).tile([self.in_channels, 1, 1, 1]), groups=self.in_channels, stride=2, padding=max(f_pad - w_pad, 0))
-            x = torch.nn.functional.conv2d(x, w, padding=max(w_pad - f_pad, 0))
+            r_pad = max(f_pad - w_pad, 0)
+            x = self.circ_pad(x, r_pad)
+            x = torch.nn.functional.conv_transpose2d(x, f.mul(4).tile([self.in_channels, 1, 1, 1]), groups=self.in_channels, stride=2, padding=(r_pad, 3*r_pad))
+
+            r_pad = max(w_pad - f_pad, 0)
+            x = self.circ_pad(x, r_pad)
+            x = torch.nn.functional.conv2d(x, w, padding=(r_pad, 0))
         elif self.fused_resample and self.down and w is not None:
-            x = torch.nn.functional.conv2d(x, w, padding=w_pad+f_pad)
+            r_pad = w_pad+f_pad
+            x = self.circ_pad(x, r_pad)
+            x = torch.nn.functional.conv2d(x, w, padding=(r_pad, 0))
             x = torch.nn.functional.conv2d(x, f.tile([self.out_channels, 1, 1, 1]), groups=self.out_channels, stride=2)
         else:
             if self.up:
-                x = torch.nn.functional.conv_transpose2d(x, f.mul(4).tile([self.in_channels, 1, 1, 1]), groups=self.in_channels, stride=2, padding=f_pad)
+                x = self.circ_pad(x, f_pad)
+                x = torch.nn.functional.conv_transpose2d(x, f.mul(4).tile([self.in_channels, 1, 1, 1]), groups=self.in_channels, stride=2, padding=(f_pad, 3*f_pad))
             if self.down:
-                x = torch.nn.functional.conv2d(x, f.tile([self.in_channels, 1, 1, 1]), groups=self.in_channels, stride=2, padding=f_pad)
+                x = self.circ_pad(x, f_pad)
+                x = torch.nn.functional.conv2d(x, f.tile([self.in_channels, 1, 1, 1]), groups=self.in_channels, stride=2, padding=(f_pad, 0))
             if w is not None:
-                x = torch.nn.functional.conv2d(x, w, padding=w_pad)
+                x = self.circ_pad(x, w_pad)
+                x = torch.nn.functional.conv2d(x, w, padding=(w_pad, 0))
         if b is not None:
             x = x.add_(b.reshape(1, -1, 1, 1))
         return x
@@ -297,7 +318,7 @@ class SongUNet(torch.nn.Module):
         for level, mult in reversed(list(enumerate(channel_mult))):
             res = img_resolution >> level
             if level == len(channel_mult) - 1:
-                self.dec[f'{res}x{res}_in0'] = UNetBlock(in_channels=cout, out_channels=cout, attention=False, **block_kwargs)
+                self.dec[f'{res}x{res}_in0'] = UNetBlock(in_channels=cout, out_channels=cout, attention=True, **block_kwargs)
                 self.dec[f'{res}x{res}_in1'] = UNetBlock(in_channels=cout, out_channels=cout, **block_kwargs)
             else:
                 self.dec[f'{res}x{res}_up'] = UNetBlock(in_channels=cout, out_channels=cout, up=True, **block_kwargs)
@@ -323,9 +344,11 @@ class SongUNet(torch.nn.Module):
             emb = emb + self.map_label(tmp * np.sqrt(self.map_label.in_features))
         if self.map_augment is not None and augment_labels is not None:
             emb = emb + self.map_augment(augment_labels)
-        if self.map_time is not None:
+        if self.map_time is not None and time_labels is not None:
             tmp = self.map_time(time_labels)
             tmp = tmp.reshape(tmp.shape[0], 2, -1).flip(1).reshape(*tmp.shape) # swap sin/cos
+            if self.training and self.label_dropout:
+                tmp = tmp * (torch.rand([x.shape[0], 1], device=x.device) >= self.label_dropout).to(tmp.dtype)
             emb = emb + tmp
         
         emb = silu(self.map_layer0(emb))
@@ -333,7 +356,10 @@ class SongUNet(torch.nn.Module):
 
         # Conditioning.
         if class_labels is not None:
-            x = torch.cat((x, class_labels), dim=1)
+            tmp = class_labels
+            if self.training and self.label_dropout:
+                tmp = tmp * (torch.rand([x.shape[0], 1, 1, 1], device=x.device) >= self.label_dropout).to(tmp.dtype)
+            x = torch.cat((x, tmp), dim=1)
 
         # Encoder.
         skips = []
@@ -377,10 +403,11 @@ class EDMPrecond(torch.nn.Module):
         sigma_min       = 0,                # Minimum supported noise level.
         sigma_max       = float('inf'),     # Maximum supported noise level.
         sigma_data      = 0.5,              # Expected standard deviation of the training data.
-        model_type      = 'ncsnpp',         # Class name of the underlying model.
+        model_type      = 'standard',         # Class name of the underlying model.
         # Remove these here and place in global
         filters         = 128,              # Number of filters in model
-        time_emb        = 0,                 # If we embed time or not
+        time_emb        = 0,                # If we embed time or not
+        label_dropout   = 0,                # Dropout for classifier free guidance
     ):
         super().__init__()
         self.img_resolution = img_resolution
@@ -389,20 +416,21 @@ class EDMPrecond(torch.nn.Module):
         self.sigma_max = sigma_max
         self.sigma_data = sigma_data
 
-        if model_type == 'ddpmpp':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
-                                embedding_type='positional', encoder_type='standard', decoder_type='standard', \
-                                channel_mult_noise=1, resample_filter=[1,1], model_channels=filters, channel_mult=[2,2,2],
-                                num_blocks=4,  time_emb=time_emb)
-        elif model_type == 'standard':
+        if model_type == 'standard':
             self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
                                 embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
                                 channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
-                                time_emb=time_emb, attn_resolutions=[])
-        elif model_type == 'ncsnppOriginal':
+                                time_emb=time_emb, attn_resolutions=[], label_dropout=label_dropout)
+        elif model_type == 'attention':
             self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
-                                embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
-                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2])
+                                embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
+                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
+                                time_emb=time_emb, attn_resolutions=[32,], label_dropout=label_dropout)
+        elif model_type == 'large':
+            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
+                                embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
+                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,4,8], \
+                                time_emb=time_emb, attn_resolutions=[32,], label_dropout=label_dropout)
         else:
             raise ValueError('Model not recognized')
     

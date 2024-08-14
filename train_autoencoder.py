@@ -20,16 +20,13 @@ from utils import *
 from autoencoder_networks import *
 from loss import *
 
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-
-# Setup argument parser to accept a JSON config file path
+"""
+JSON
+"""
 parser = argparse.ArgumentParser(description='Run model with configuration from JSON file.')
 parser.add_argument('config_path', type=str, help='Path to JSON configuration file.')
 args = parser.parse_args()
 
-# Load configuration from a JSON file
 def load_config(json_file):
     with open(json_file, 'r') as file:
         config = json.load(file)
@@ -39,93 +36,36 @@ config_path = args.config_path
 config = load_config(config_path)
 
 # Constants and configurations loaded from JSON
-name        = config['name']
-model_choice = config['model']
-loss_function = config['loss_function']
-
-batch_size = config['batch_size']
-filters     = config['filters']
-wd          = config['wd']
-lr          = config['lr']
-num_epochs  = config['num_epochs']
-spacing     = config['spacing']
-l1_penalty = config['l1_penalty']
+name            = config['name']
+model_choice    = config['model']
+loss_function   = config['loss_function']
+batch_size      = config['batch_size']
+filters         = config['filters']
+wd              = config['wd']
+lr              = config['lr']
+num_epochs      = config['num_epochs']
+spacing         = config['spacing']
+l1_penalty      = config['l1_penalty']
 no_latent_channels = config['no_latent_channels']
 optimizer_choice = config['optimizer']
 
-# --------------------------
 
-iterations = 2101000
-# Constants and configurations
-on_remote = True  # Flag to switch between remote and local paths
+date = '2024-05-24'
+on_remote = True 
 
-# Path to the dataset, changes based on the execution environment
-
-date = '2024-05-24'  # Date of the experiment
 result_path = Path(f'/proj/berzelius-2022-164/users/sm_maran/results/{date}/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
 
-# Path(f'/nobackup/smhid20/users/sm_maran/results/{date}/{name}/') 
-
-# Check if the directory exists, and create it if it doesn't
 if not result_path.exists():
     result_path.mkdir(parents=True, exist_ok=True)
 
-# Copy the JSON configuration file to the results directory
 config_file_name = Path(config_path).name
 shutil.copy(config_path, result_path / "config.json")
-
-# ---------------------------
-
-qg = False
-
-if qg:
-    """ 
-    QG
-    """
-
-    # QG Dataset
-
-    mean_data = 0.003394413273781538
-    std_data = 9.174626350402832
-    norm_factors = (mean_data, std_data)
-
-    iterations = 2101000
-    spinup = 1001
-    p_train = 0.8
-
-    n_samples = iterations+1
-    n_train = int(np.round(p_train * (n_samples - spinup)))  # Number of training samples
-    n_val = int(np.round((1 - p_train) / 2 * (n_samples - spinup)))  # Number of validation samples
-    sample_counts = (n_samples, n_train, n_val)
-
-    fname= f'QG_samples_SUBS_{iterations}.npy'
-    subd = 'C:/Users/svart/Desktop/MEX/data/'
-    if on_remote:
-        subd = '/nobackup/smhid20/users/sm_maran/dpr_data/simulations'
-    dataset_path = Path(f'{subd}/{fname}')
-
-    grid_dimensions = (65, 65)
-    max_lead_time = 150
-
-    QG_kwargs = {
-                'dataset_path':     dataset_path,
-                'sample_counts':    sample_counts,
-                'grid_dimensions':  grid_dimensions,
-                'max_lead_time':    max_lead_time,
-                'norm_factors':     norm_factors,
-                'device':           device,
-                'spinup':           spinup,
-                'spacing':          spacing,
-                'dtype':            'float32'
-                }
-# WB
-# ---------------------------
 
 """ 
 WB
 """
 
-# WB Dataset
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 offset = 2**7
 
@@ -143,7 +83,6 @@ sample_counts = (n_samples, n_train, n_val)
 fname= 'geopotential_500hPa_1979-2018_5.625deg.npy'
 subd = 'C:/Users/svart/Desktop/MEX/data/'
 if on_remote:
-    #subd = '/nobackup/smhid20/users/sm_maran/dpr_data/simulations'
     subd = '/proj/berzelius-2022-164/users/sm_maran/data/wb'
 dataset_path = Path(f'{subd}/{fname}')
 
@@ -153,7 +92,6 @@ max_lead_time = 240
 fnm_ll = f'{subd}/latlon_500hPa_1979-2018_5.625deg.npz'
 buf = np.load(fnm_ll)
 lat, lon = buf['arr_0'], buf['arr_1']
-
 
 WB_kwargs = {
             'dataset_path':     dataset_path,
@@ -170,22 +108,26 @@ WB_kwargs = {
 
 kwargs = WB_kwargs
 
-# ---------------------------
-# Way to load a dataset with a specific lead time
-lead_time = 1
-train_dataset = QGDataset(lead_time=lead_time,dataset_mode='train', **kwargs)
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-
-# Way to load a dataset with a specific lead time
-val_dataset = QGDataset(lead_time=lead_time, dataset_mode='val', **kwargs)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
 def train():
+    """
+    Data loading
+    """
 
+    lead_time = 1
+    train_dataset = QGDataset(lead_time=lead_time,dataset_mode='train', **kwargs)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
+    # Way to load a dataset with a specific lead time
+    val_dataset = QGDataset(lead_time=lead_time, dataset_mode='val', **kwargs)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    
+    
     """
     Model Loading
     """
+
+
     if model_choice == "autoencoder":
         model = Autoencoder(filters= filters, no_latent_channels=no_latent_channels, no_downsamples=1, start_kernel=3)
     elif model_choice== "deep":
@@ -205,13 +147,16 @@ def train():
     print("Num params: ", sum(p.numel() for p in model.parameters()), flush=True)
     model.to(device)
 
+    """
+    Optimizing
+    """
+
     if optimizer_choice == "AdamW":
         optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
     elif optimizer_choice == "SGD":
         optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=wd)
     else:
         raise Exception("Optimizer not found")
-    
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.001, end_factor=1.0, total_iters=1000)
 
@@ -230,7 +175,7 @@ def train():
     Training starts here
     """
     for epoch in range(num_epochs):
-        model.train()  # Set model to training mode
+        model.train()
         total_train_loss = 0
 
         for previous, _, _ in (train_loader):
@@ -279,7 +224,7 @@ def train():
         
         # Log to CSV    
         loss_values.append([avg_train_loss])
-        val_loss_values.append(avg_val_loss)  # Assuming val_loss_values list exists
+        val_loss_values.append(avg_val_loss)
         
         # Log to CSV
         with open(log_file_path, mode='a', newline='') as file:

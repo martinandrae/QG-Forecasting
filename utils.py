@@ -16,6 +16,7 @@ class QGDataset(torch.utils.data.Dataset):
                  spacing = 1,      # int: Sample selection interval for data reduction.
                  dtype='float32',   # str: Data type of the dataset (default 'float32').
                  offset=0,          # int: Offset for memory-mapped file (default 0).
+                 initial_times=[0,]
                 ):
         """
         Initialize a custom Dataset for lazily loading QG samples from a memory-mapped file,
@@ -31,9 +32,11 @@ class QGDataset(torch.utils.data.Dataset):
         self.n_lat, self.n_lon = grid_dimensions
         self.max_lead_time = max_lead_time
         self.lead_time = lead_time
-        self.spinup = spinup
+        self.spinup = spinup - min(initial_times)
         self.spacing = spacing
         self.mean, self.std_dev = norm_factors
+        
+        self.initial_times = initial_times
 
         self.total_rows, self.total_columns = self._compute_dimensions()
         self.index_array = self._generate_indices()
@@ -71,8 +74,9 @@ class QGDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         """Retrieves a sample and its corresponding future or past state from the dataset."""
-        x_index = self.index_array[idx]
-        y_index = x_index + self.lead_time
+        start_index = self.index_array[idx]
+        x_index = start_index + self.initial_times
+        y_index = start_index + self.lead_time
 
         X_sample = self.mmap[x_index, :].astype(self.data_dtype)
         Y_sample = self.mmap[y_index, :].astype(self.data_dtype)

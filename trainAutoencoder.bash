@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J mscthesis
-#SBATCH -t 0-02:00:00
-#SBATCH --reservation=1g.10gb
+#SBATCH -t 3-00:00:00
+#SBATCH --gpus=1 -C "thin"
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=mandra@kth.se
 #
@@ -12,7 +12,7 @@ mamba activate QG
 cd /proj/berzelius-2022-164/users/sm_maran/QG-Forecasting
 
 # Path to your Python script
-PYTHON_SCRIPT_PATH="train_autoencoder.py"
+PYTHON_SCRIPT_PATH="train_diffusion_noae.py"
 
 # The first command line argument specifies the config number
 CONFIG_NUMBER="$1"

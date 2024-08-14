@@ -1,0 +1,13 @@
+{
+  "name": "diffusion-f32-lr-4-wd0-120h-large-6h",
+  "batch_size": 32,
+  "filters": 32,
+  "wd": 1,
+  "lr": 0.0001,
+  "num_epochs": 100,
+  "spacing": 1,
+  "max_lead_time": 120,
+  "label_dropout": 0,
+  "initial_times": [0],
+  "dt": 6
+  }
