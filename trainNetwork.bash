@@ -1,17 +1,18 @@
 #!/bin/bash
 #SBATCH -J mscthesis
-#SBATCH -t 6-00:00:00
-#SBATCH -N 1
+#SBATCH -t 3-00:00:00
+#SBATCH --gpus=1 -C "thin"
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=mandra@kth.se
 #
 
-module add Anaconda/2022.05-nsc1
+module load Mambaforge/23.3.1-1-hpc1-bdist
+mamba activate QG
 
-conda activate processing
+cd /proj/berzelius-2022-164/users/sm_maran/QG-Forecasting
 
 # Path to your Python script
-PYTHON_SCRIPT_PATH="train_network.py"
+PYTHON_SCRIPT_PATH="train_diffusion.py"
 
 # The first command line argument specifies the config number
 CONFIG_NUMBER="$1"
@@ -21,3 +22,4 @@ CONFIG_JSON_PATH="configs/${CONFIG_NUMBER}.json"
 
 # Execute Python script with JSON configuration
 python $PYTHON_SCRIPT_PATH $CONFIG_JSON_PATH
+

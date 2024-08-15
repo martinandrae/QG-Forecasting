@@ -19,6 +19,7 @@ import datetime
 from utils import *
 from autoencoder_networks import *
 from loss import *
+from sampler import *
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -46,19 +47,23 @@ num_epochs  = config['num_epochs']
 wd          = config['wd']
 lr          = config['lr']
 batch_size = config['batch_size']
+max_lead_time = config['max_lead_time']
+label_dropout = config['label_dropout']
+initial_times = config['initial_times']
+dt = config['dt']
 
 # --------------------------
 on_remote = True  # Flag to switch between remote and local paths
-autoencoder_date = '2024-05-24'  # Date of the experiment
+#autoencoder_date = '2024-05-24'  # Date of the experiment
 
-autoencoder_model = 'autoencoder-f4-f64'
-pth = f'/proj/berzelius-2022-164/users/sm_maran/results/{autoencoder_date}' if on_remote else f'C:/Users/svart/Desktop/MEX/results/{autoencoder_date}'
+#autoencoder_model = 'autoencoder-f4-f64'
+#pth = f'/proj/berzelius-2022-164/users/sm_maran/results/{autoencoder_date}' if on_remote else f'C:/Users/svart/Desktop/MEX/results/{autoencoder_date}'
 
-autoencoder_path = Path(f'{pth}/{autoencoder_model}') if on_remote else Path(f'{pth}/{autoencoder_model}')
+#autoencoder_path = Path(f'{pth}/{autoencoder_model}') if on_remote else Path(f'{pth}/{autoencoder_model}')
 
 # Path to the dataset, changes based on the execution environment
 
-date = '2024-05-26'  # Date of the experiment
+date = '2024-06-03'  # Date of the experiment
 result_path = Path(f'/proj/berzelius-2022-164/users/sm_maran/results/{date}/{name}/') if on_remote else Path(f'C:/Users/svart/Desktop/MEX/results/{name}')
 
 # Check if the directory exists, and create it if it doesn't
@@ -71,7 +76,8 @@ shutil.copy(config_path, result_path / "config.json")
 
 
 # Note that this needs to be precalculated
-std_path = f'{autoencoder_path}/WB_stds.txt'
+autoencoder_path = "stds"
+std_path = f'{autoencoder_path}/WB_noae_stds.txt'
 precomputed_std = torch.tensor(np.loadtxt(std_path,delimiter=' ')[:,1], dtype=torch.float32).to(device)
 def residual_scaling(x):
     return precomputed_std[x.to(dtype=int)-1]
@@ -104,7 +110,7 @@ if on_remote:
 dataset_path = Path(f'{subd}/{fname}')
 
 grid_dimensions = (32, 64)
-max_lead_time = 240
+max_lead_time = max_lead_time
 
 fnm_ll = f'{subd}/latlon_500hPa_1979-2018_5.625deg.npz'
 buf = np.load(fnm_ll)
@@ -121,13 +127,14 @@ WB_kwargs = {
             'spinup':           spinup,
             'spacing':          spacing,
             'dtype':            'float32',
-            'offset':           offset
+            'offset':           offset,
+            'initial_times':    initial_times
             }
 
 kwargs = WB_kwargs
 
 # Way to load a dataset with lead time following a distribution given by update_k_per_batch
-update_k_per_batch = get_uniform_k_dist_fn(kmin=1, kmax=max_lead_time, d=1)
+update_k_per_batch = get_uniform_k_dist_fn(kmin=dt, kmax=max_lead_time, d=dt)
 
 train_time_dataset = QGDataset(lead_time=max_lead_time, dataset_mode='train', **kwargs)
 train_batch_sampler = DynamicKBatchSampler(train_time_dataset, batch_size=batch_size, drop_last=True, k_update_callback=update_k_per_batch, shuffle=True)
@@ -137,11 +144,54 @@ val_time_dataset = QGDataset(lead_time=max_lead_time, dataset_mode='val', **kwar
 val_batch_sampler = DynamicKBatchSampler(val_time_dataset, batch_size=batch_size, drop_last=True, k_update_callback=update_k_per_batch, shuffle=True)
 val_time_loader = DataLoader(val_time_dataset, batch_sampler=val_batch_sampler)
 
+# Way to load a dataset with a specific lead time
+lead_time = max_lead_time
+train_dataset = QGDataset(lead_time=lead_time,dataset_mode='train', **kwargs)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+
+# Way to load a dataset with a specific lead time
+val_dataset = QGDataset(lead_time=lead_time, dataset_mode='val', **kwargs)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+#val_time_loader = val_loader
+#train_time_loader = train_loader
+
+def generate_ensemble_from_batch_noae(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler):
+    # Need to choose batch_size such that batch_size*n_ens fits on GPU
+    model.eval()
+
+    previous, current, time_labels = next(iter(selected_loader))
+    lead_time = time_labels[0].item()
+
+    with torch.no_grad():
+        previous = previous.to(device)
+        current = current.to(device)
+        #previous_latent = autoencoder.encoder(previous)
+        previous_latent = previous[:,0].unsqueeze(1).repeat(n_ens, 1, 1, 1)
+        class_labels = previous.repeat(n_ens, 1, 1, 1)
+        time_labels = torch.ones(class_labels.shape[0], device=device, dtype=int) * lead_time / max_lead_time
+
+        latents = torch.randn_like(previous_latent, device=device)
+
+        predicted_residuals = sampler_fn(model, latents, class_labels, time_labels, sigma_max=80, sigma_min=0.03, rho=7, num_steps=20, S_churn=2.5, S_min=0.75, S_max=80, S_noise=1.05)
+
+        predicted_latent = previous_latent + predicted_residuals * residual_scaling(torch.tensor(lead_time))
+        #predicted = autoencoder.decoder(predicted_latent.to(torch.float32))
+        predicted = predicted_latent
+        
+        predicted_unnormalized = predicted * std_data + mean_data
+        current_unnormalized = current * std_data + mean_data
+
+        predicted_unnormalized = predicted_unnormalized.view(n_ens, current.size(0), current.size(1), current.size(2), current.size(3))
+
+    return predicted_unnormalized, current_unnormalized
+
+
 def train():
 
     """
     Autoencoder
-    """
+    
     saved_model = torch.load(autoencoder_path / 'best_model.pth')
 
     # Read parameters from JSON file
@@ -163,16 +213,22 @@ def train():
     autoencoder.to(device)
     autoencoder.eval()
     print("Autoencoder loaded successfully!", flush=True)
+    """
 
     """
     Model Loading
     """
-
-    model = EDMPrecond(filters=filters, img_channels=2*latent_dim, img_resolution = 16, time_emb=1, model_type='standard', sigma_data=1, sigma_min=0.02, sigma_max=88)
+    latent_dim=1
+    model_type = 'large'
+    input_times = 1 + len(initial_times)
+    model = EDMPrecond(filters=filters, img_channels=input_times*latent_dim, img_resolution = 64, time_emb=1, 
+                       model_type=model_type, sigma_data=1, sigma_min=0.02, sigma_max=88, label_dropout=label_dropout)
     #loss_fn = GCLoss()
     loss_fn = WGCLoss(lat, lon, device)
+    calculate_WRMSE = calculate_AreaWeightedRMSE(lat, lon, device).calculate
+    calculate_WSpread = calculate_AreaWeightedRMSE(lat, lon, device).spread
 
-
+    print(name)
     print("Num params: ", sum(p.numel() for p in model.parameters()), flush=True)
     model.to(device)
 
@@ -184,12 +240,53 @@ def train():
     val_loss_values = []
     best_val_loss = float('inf')
 
+    model.eval()
+    total_val_loss = 0
+    with torch.no_grad():
+        for previous, current, time_label in (val_time_loader):
+            current = current.to(device)
+            previous = previous.to(device)
+            time_label = time_label.to(device)
+            
+            #current_latent = autoencoder.encoder(current)
+            current_latent = (current)
+
+            #previous_latent = autoencoder.encoder(previous)
+            previous_latent = previous[:,0].unsqueeze(1)
+            class_labels = previous
+                                
+            target_latent = (current_latent - previous_latent) / residual_scaling(time_label[0])
+            
+            loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time)
+            
+            total_val_loss += loss.item()
+                
+        avg_val_loss = total_val_loss / len(val_time_loader)
+
+    print(f'Starting Validation Loss: {avg_val_loss:.4f}', flush=True)
+
     # Setup for logging
     log_file_path = result_path / f'training_log.csv'
     with open(log_file_path, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['Epoch', 'Average Training Loss', 'Validation Loss'])
     
+    # Sampling
+    val_dataset.set_lead_time(24*3)
+    forecast, truth = generate_ensemble_from_batch_noae(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
+    wrmse_1 = calculate_WRMSE(forecast, truth)
+    skill_1 = calculate_WRMSE(forecast.mean(dim=0, keepdim=True), truth)
+    spread_1 = calculate_WSpread(forecast, truth)
+
+    val_dataset.set_lead_time(24*5)
+    forecast, truth = generate_ensemble_from_batch_noae(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
+    wrmse_2 = calculate_WRMSE(forecast, truth)
+    skill_2 = calculate_WRMSE(forecast.mean(dim=0, keepdim=True), truth)
+    spread_2 = calculate_WSpread(forecast, truth)
+
+    print(f'Val WRMSE:\t 3d: {np.mean(wrmse_1.flatten()):.0f}, Skill: {np.mean(skill_1.flatten()):.0f}, Spread: {np.mean(spread_1.flatten()):.0f}, \t 5d: {np.mean(wrmse_2.flatten()):.0f}, Skill: {np.mean(skill_2.flatten()):.0f}, Spread: {np.mean(spread_2.flatten()):.0f}', flush=True)
+
+    best_val_sample = np.mean(wrmse_1 + wrmse_2)/2
 
     """
     Training starts here
@@ -206,12 +303,16 @@ def train():
             optimizer.zero_grad()
             
             with torch.no_grad():
-                current_latent = autoencoder.encoder(current)
+                #current_latent = autoencoder.encoder(current)
+                current_latent = (current)
 
-                previous_latent = autoencoder.encoder(previous)
+                #previous_latent = autoencoder.encoder(previous)
+                previous_latent = previous[:,0].unsqueeze(1)
+                class_labels = previous
+
                 target_latent = (current_latent - previous_latent) / residual_scaling(time_label[0])
                 
-            loss = loss_fn(model, target_latent, previous_latent, time_label/max_lead_time)
+            loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time)
 
             total_train_loss += loss.item()
 
@@ -230,11 +331,16 @@ def train():
                 previous = previous.to(device)
                 time_label = time_label.to(device)
                 
-                current_latent = autoencoder.encoder(current)
-                previous_latent = autoencoder.encoder(previous)
+                #current_latent = autoencoder.encoder(current)
+                current_latent = (current)
+
+                #previous_latent = autoencoder.encoder(previous)
+                previous_latent = previous[:,0].unsqueeze(1)
+                class_labels = previous
+                                   
                 target_latent = (current_latent - previous_latent) / residual_scaling(time_label[0])
                 
-                loss = loss_fn(model, target_latent, previous_latent, time_label/max_lead_time)
+                loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time)
                 
                 total_val_loss += loss.item()
                     
@@ -244,6 +350,7 @@ def train():
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), result_path/f'best_model.pth')
+            
         
         scheduler.step()
         
@@ -259,5 +366,27 @@ def train():
         print(f'Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}', flush=True)
 
         torch.save(model.state_dict(), result_path/f'final_model.pth')
+
+        ## Val
+        val_dataset.set_lead_time(24*3)
+        forecast, truth = generate_ensemble_from_batch_noae(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
+        wrmse_1 = calculate_WRMSE(forecast, truth)
+        skill_1 = calculate_WRMSE(forecast.mean(dim=0, keepdim=True), truth)
+        spread_1 = calculate_WSpread(forecast, truth)
+
+        val_dataset.set_lead_time(24*5)
+        forecast, truth = generate_ensemble_from_batch_noae(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
+        wrmse_2 = calculate_WRMSE(forecast, truth)
+        skill_2 = calculate_WRMSE(forecast.mean(dim=0, keepdim=True), truth)
+        spread_2 = calculate_WSpread(forecast, truth)
+
+        print(f'Val WRMSE:\t 3d: {np.mean(wrmse_1.flatten()):.0f}, Skill: {np.mean(skill_1.flatten()):.0f}, Spread: {np.mean(spread_1.flatten()):.0f}, \t 5d: {np.mean(wrmse_2.flatten()):.0f}, Skill: {np.mean(skill_2.flatten()):.0f}, Spread: {np.mean(spread_2.flatten()):.0f}', flush=True)
+
+        val_sample = np.mean(wrmse_1 + wrmse_2)/2
+
+        # Checkpointing
+        if val_sample < best_val_sample:
+            best_val_sample = val_sample
+            torch.save(model.state_dict(), result_path/f'best_sample_model.pth')
 
 train()
