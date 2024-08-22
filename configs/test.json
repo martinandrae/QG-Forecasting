@@ -1,13 +1,13 @@
 {
-    "name": "t850_f16_lr-4",
-    "batch_size": 32,
+    "name": "test",
+    "batch_size": 10,
     "filters": 16,
     "wd": 0.1,
     "lr": 0.0001,
-    "num_epochs": 200,
-    "spacing": 1,
+    "num_epochs": 1,
+    "spacing": 10000,
     "max_lead_time": 120,
     "label_dropout": 0,
     "initial_times": [0],
-    "dt": 1
+    "dt": 6
     }

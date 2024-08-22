@@ -400,6 +400,7 @@ class EDMPrecond(torch.nn.Module):
     def __init__(self,
         img_resolution,                     # Image resolution.
         img_channels,                       # Number of color channels.
+        out_channels,
         sigma_min       = 0,                # Minimum supported noise level.
         sigma_max       = float('inf'),     # Maximum supported noise level.
         sigma_data      = 0.5,              # Expected standard deviation of the training data.
@@ -417,17 +418,17 @@ class EDMPrecond(torch.nn.Module):
         self.sigma_data = sigma_data
 
         if model_type == 'standard':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
+            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
                                 embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
                                 channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
                                 time_emb=time_emb, attn_resolutions=[], label_dropout=label_dropout)
         elif model_type == 'attention':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
+            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
                                 embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
                                 channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
                                 time_emb=time_emb, attn_resolutions=[32,], label_dropout=label_dropout)
         elif model_type == 'large':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=1, \
+            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
                                 embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
                                 channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,4,8], \
                                 time_emb=time_emb, attn_resolutions=[32,], label_dropout=label_dropout)

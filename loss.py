@@ -63,7 +63,7 @@ class WGCLoss:
         n = torch.randn_like(y) * sigma
         D_yn = net(y + n, sigma, class_labels, time_labels)
         loss = self.area_weights * weight * ((D_yn - y) ** 2)
-        loss = loss.sum().mul(1/images.shape[0])
+        loss = loss.sum().mul(1/(images.shape[0]*images.shape[1]))
         return loss
 
 #----------------------------------------------------------------------------
@@ -81,13 +81,13 @@ class calculate_WeightedRMSE:
         return self.diff(input, target).mean().sqrt()
     
     def calculate(self, input: torch.tensor, target: torch.tensor):
-        dims_to_include = list(range(2, input.dim()))
+        dims_to_include = list(range(3, input.dim()))
         return self.diff(input, target).mean(dim=dims_to_include).sqrt().cpu().detach().numpy()
     
     def spread(self, input: torch.tensor, target: torch.tensor):
         ens_mean = input.mean(dim=0)
         N = input.size(0)
-        dims_to_include = list(range(1, target.dim()))
+        dims_to_include = list(range(2, target.dim()))
         spread = ((self.weights*(ens_mean - input)**2).sum(dim=0)/(N - 1)).mean(dim=dims_to_include).sqrt().cpu().detach().numpy()
         return spread
 

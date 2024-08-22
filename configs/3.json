@@ -1,13 +1,13 @@
 {
-  "name": "diffusion-f32-lr-4-wd0-120h-large-6h-IC[0,-6]",
-  "batch_size": 32,
-  "filters": 32,
-  "wd": 1,
-  "lr": 0.0001,
-  "num_epochs": 100,
-  "spacing": 1,
-  "max_lead_time": 120,
-  "label_dropout": 0,
-  "initial_times": [0, -6],
-  "dt": 6
-  }
+    "name": "z500_t850_f16_short",
+    "batch_size": 32,
+    "filters": 16,
+    "wd": 0.1,
+    "lr": 0.0001,
+    "num_epochs": 50,
+    "spacing": 1,
+    "max_lead_time": 120,
+    "label_dropout": 0,
+    "initial_times": [0],
+    "dt": 1
+    }

@@ -1,11 +1,13 @@
 {
-  "name": "diffusion-f16-lr-4-wd-2-120h-attention",
-  "batch_size": 32,
-  "filters": 16,
-  "wd": 0.01,
-  "lr": 0.0001,
-  "num_epochs": 200,
-  "spacing": 1,
-  "max_lead_time": 120,
-  "label_dropout": 0
-  }
+    "name": "z500_t850_f16",
+    "batch_size": 32,
+    "filters": 16,
+    "wd": 0.1,
+    "lr": 0.0001,
+    "num_epochs": 200,
+    "spacing": 1,
+    "max_lead_time": 120,
+    "label_dropout": 0,
+    "initial_times": [0],
+    "dt": 1
+    }
