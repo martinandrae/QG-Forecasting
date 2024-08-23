@@ -83,6 +83,10 @@ class calculate_WeightedRMSE:
     def calculate(self, input: torch.tensor, target: torch.tensor):
         dims_to_include = list(range(3, input.dim()))
         return self.diff(input, target).mean(dim=dims_to_include).sqrt().cpu().detach().numpy()
+
+    def skill(self, input: torch.tensor, target: torch.tensor):
+        input = input.mean(dim=0, keepdim=True)
+        return self.calculate(input, target)[0]
     
     def spread(self, input: torch.tensor, target: torch.tensor):
         ens_mean = input.mean(dim=0)
