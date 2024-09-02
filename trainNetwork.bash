@@ -12,7 +12,7 @@ mamba activate QG
 cd /proj/berzelius-2022-164/users/sm_maran/QG-Forecasting
 
 # Path to your Python script
-PYTHON_SCRIPT_PATH="train_diffusion.py"
+PYTHON_SCRIPT_PATH="train_diffusion_states.py"
 
 # The first command line argument specifies the config number
 CONFIG_NUMBER="$1"

@@ -38,6 +38,9 @@ class QGDataset(torch.utils.data.Dataset):
         self.mean, self.std_dev = norm_factors
         
         self.initial_times = initial_times
+        self.input_times = self.vars * len(self.initial_times)
+        self.output_times = self.vars * (len(self.lead_time) if isinstance(lead_time, (list, tuple, np.ndarray)) else 1)
+
 
         self.index_array = self._generate_indices()
 
@@ -78,8 +81,8 @@ class QGDataset(torch.utils.data.Dataset):
         X_sample = (X_sample - self.mean[None, :, None, None]) / self.std_dev[None, :, None, None]
         Y_sample = (Y_sample - self.mean[None, :, None, None]) / self.std_dev[None, :, None, None]
 
-        X_sample = torch.tensor(X_sample, dtype=torch.float32).view(-1, self.n_lat, self.n_lon)
-        Y_sample = torch.tensor(Y_sample, dtype=torch.float32).view(-1, self.n_lat, self.n_lon)
+        X_sample = torch.tensor(X_sample, dtype=torch.float32).view(self.input_times, self.n_lat, self.n_lon)
+        Y_sample = torch.tensor(Y_sample, dtype=torch.float32).view(self.output_times, self.n_lat, self.n_lon)
 
         return X_sample, Y_sample, self.lead_time
 

@@ -57,7 +57,7 @@ dt = config['dt']
 
 # Path to the dataset, changes based on the execution environment
 
-date = '2024-08-31'  # Date of the experiment
+date = '2024-09-01'  # Date of the experiment
 result_path = Path(f'/proj/berzelius-2022-164/users/sm_maran/results/{date}/{name}/')
 
 # Check if the directory exists, and create it if it doesn't
@@ -69,7 +69,7 @@ config_file_name = Path(config_path).name
 shutil.copy(config_path, result_path / "config.json")
 
 # -----------------------------------------------------
-
+"""
 std_path = '/proj/berzelius-2022-164/users/sm_maran/data/wb/residual_stds'
 
 precomputed_std = []
@@ -85,7 +85,7 @@ precomputed_std = torch.stack([res_std for res_std in precomputed_std], axis=1)
 
 def residual_scaling(x):
     return precomputed_std[x.to(dtype=int)-1][None, :, None, None]
-
+"""
 # -----------------------------------------------------
 
 # Variables
@@ -119,7 +119,7 @@ norm_factors = np.stack([mean_data, std_data], axis=0)
 
 # -----------------------------------------------------
 
-spacing = 1
+spacing = spacing
 spinup = 0
 ti = pd.date_range(datetime.datetime(1979,1,1,0), datetime.datetime(2018,12,31,23), freq='1h')
 ti = pd.date_range(datetime.datetime(1979,1,1,0), datetime.datetime(2018,12,31,23), freq='1h')
@@ -205,8 +205,8 @@ def generate_ensemble_from_batch(model, n_ens=10, selected_loader = val_loader, 
 
         latents = torch.randn_like(previous_state, device=device)
         
-        predicted_residuals = sampler_fn(model, latents, class_labels, time_labels, sigma_max=80, sigma_min=0.03, rho=7, num_steps=20, S_churn=2.5, S_min=0.75, S_max=80, S_noise=1.05)
-        predicted_latent = previous_state + predicted_residuals * residual_scaling(torch.tensor(lead_time))
+        predicted_state = sampler_fn(model, latents, class_labels, time_labels, sigma_max=80, sigma_min=0.03, rho=7, num_steps=20, S_churn=2.5, S_min=0.75, S_max=80, S_noise=1.05)
+        predicted_latent = predicted_state # previous_state +  * residual_scaling(torch.tensor(lead_time))
         predicted = predicted_latent
         
         predicted_unnormalized = renormalize(predicted)
@@ -256,7 +256,7 @@ def train():
             previous_state = previous[:,:vars]
             class_labels = previous
                                 
-            target_latent = (current_latent - previous_state) / residual_scaling(time_label[0])
+            target_latent = (current_latent)# - previous_state) / residual_scaling(time_label[0])
             
             loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time)
             
@@ -314,7 +314,7 @@ def train():
                 previous_state = previous[:,:vars]
                 class_labels = previous
 
-                target_latent = (current_latent - previous_state) / residual_scaling(time_label[0])
+                target_latent = (current_latent)# - previous_state) / residual_scaling(time_label[0])
                 
             loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time)
 
@@ -340,7 +340,7 @@ def train():
                 previous_state = previous[:,:vars]
                 class_labels = previous
                                    
-                target_latent = (current_latent - previous_state) / residual_scaling(time_label[0])
+                target_latent = (current_latent)# - previous_state) / residual_scaling(time_label[0])
                 
                 loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time)
                 
