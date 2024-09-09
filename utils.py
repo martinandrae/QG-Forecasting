@@ -18,6 +18,8 @@ class QGDataset(torch.utils.data.Dataset):
                  dtype='float32',   # str: Data type of the dataset (default 'float32').
                  offset=0,          # int: Offset for memory-mapped file (default 0).
                  initial_times=[0,],
+                 static_data_path = None,
+                 random_lead_time = 0,
 
                 ):
         """
@@ -38,19 +40,45 @@ class QGDataset(torch.utils.data.Dataset):
         self.spacing = spacing
         self.mean, self.std_dev = norm_factors
         self.kmin, self.kmax, self.d = lead_time_range
+
+        self.static_data_path = static_data_path
+        self.static_fields = None
+
+        self.static_vars = 0
+        if static_data_path != None:
+            self.static_fields = self.load_static_data()      
+            self.static_vars = self.static_fields.shape[1]
         
         self.initial_times = initial_times
         self.input_times = self.vars * len(self.initial_times)
         self.output_times = self.vars * (len(self.lead_time) if isinstance(lead_time, (list, tuple, np.ndarray)) else 1)
 
-
         self.index_array = self._generate_indices()
 
         self.mmap = self.create_mmap()
 
+        self.random_lead_time = random_lead_time
+
+
     def create_mmap(self):
         """Creates a memory-mapped array for the dataset to facilitate large data handling."""
         return np.memmap(self.dataset_path, dtype=self.data_dtype, mode='r', shape=(self.n_samples, self.vars, self.n_lat, self.n_lon), offset=self.offset)
+
+    def load_static_data(self):
+        """Load and normalize static fields."""
+        static_fields = np.load(self.static_data_path)
+
+        min_vals = np.min(static_fields, axis=(1,2))
+        max_vals = np.max(static_fields, axis=(1,2))
+
+        # Avoid division by zero by ensuring max_vals are not equal to min_vals
+        range_vals = max_vals - min_vals
+        range_vals[range_vals == 0] = 1  # Replace zero range with one to avoid division by zero
+
+        # Apply min-max scaling: (x - min) / (max - min)
+        scaled_static_fields = (static_fields - min_vals[:, None, None]) / range_vals[:, None, None]
+        #scaled_static_fields = np.expand_dims(scaled_static_fields, axis=0)
+        return scaled_static_fields
 
     def _generate_indices(self):
         """Generates indices for dataset partitioning according to the specified dataset_mode."""
@@ -71,10 +99,9 @@ class QGDataset(torch.utils.data.Dataset):
         self.kmin, self.kmax, self.d = lead_time_range
 
     def get_lead_time(self):
-        #return self.lead_time
-        return self.kmin + self.d * torch.randint(0, 1 + (self.kmax - self.kmin) // self.d, (1,), device=self.device)[0]
-
-        #return self.lead_time
+        if self.random_lead_time:
+            return self.kmin + self.d * torch.randint(0, 1 + (self.kmax - self.kmin) // self.d, (1,), device=self.device)[0]
+        return self.lead_time
 
     def __len__(self):
         """Returns the number of samples available in the dataset based on the computed indices."""
@@ -96,6 +123,9 @@ class QGDataset(torch.utils.data.Dataset):
 
         X_sample = torch.tensor(X_sample, dtype=torch.float32).view(self.input_times, self.n_lat, self.n_lon)
         Y_sample = torch.tensor(Y_sample, dtype=torch.float32).view(self.output_times, self.n_lat, self.n_lon)
+
+        if self.static_vars != 0:
+            X_sample = np.concatenate([X_sample, self.static_fields], axis=0)
 
         return X_sample, Y_sample, lead_times
 

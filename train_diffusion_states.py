@@ -60,6 +60,8 @@ model_choice = config['model']
 
 date = '2024-09-09'  # Date of the experiment
 result_path = Path(f'/proj/berzelius-2022-164/users/sm_maran/results/{date}/{name}/')
+subd = '/proj/berzelius-2022-164/users/sm_maran/data/wb'
+
 
 # Check if the directory exists, and create it if it doesn't
 if not result_path.exists():
@@ -71,57 +73,52 @@ shutil.copy(config_path, result_path / "config.json")
 
 # -----------------------------------------------------
 
-std_path = '/proj/berzelius-2022-164/users/sm_maran/data/wb/residual_stds'
+stds_directory = save_directory = f"{subd}/residual_stds"
+
+var_names = ['z500', 't850', 't2m', 'u10', 'v10']
 
 precomputed_std = []
 
-res_std_geopotential500 = torch.tensor(np.loadtxt('stds/WB_z500.txt',delimiter=' ')[:,1], dtype=torch.float32).to(device)
-res_std_geopotential500 = res_std_geopotential500
-precomputed_std.append(res_std_geopotential500)
-
-res_std_temperature850 = torch.tensor(np.loadtxt('stds/WB_t850.txt',delimiter=' ')[:,1], dtype=torch.float32).to(device)
-precomputed_std.append(res_std_temperature850)
+for var_name in var_names:
+    file_path = f'{stds_directory}/WB_{var_name}.txt'
+    std_values = torch.tensor(np.loadtxt(file_path, delimiter=' ')[:, 1], dtype=torch.float32).to(device)
+    precomputed_std.append(std_values)
 
 precomputed_std = torch.stack([res_std for res_std in precomputed_std], axis=1)
 
-"""
+precomputed_std = precomputed_std[:max_lead_time]
+
 def residual_scaling(x):
-    return precomputed_std[x.to(dtype=int)-1][None, :, None, None]
-"""
+    if x.ndim == 0:
+        x = x.unsqueeze(0)  
+    indices = x.to(dtype=int) - 1
+    
+    return precomputed_std[indices].view(x.shape[0], vars, 1, 1)
+
 # -----------------------------------------------------
 
-# Variables
-mean_data = []
-std_data = []
+fname= 'z500_t850_t2m_u10_v10_1979-2018_5.625deg.npy'
 
-# Geopotential 500hPa
-#fname= 'geopotential_500hPa_1979-2018_5.625deg.npy'
-mean_geopotential500 = 54112.887 
-std_geopotential500 = 3354.9524
+static_data_path = f'{subd}/orog_lsm_1979-2018_5.625deg.npy'
+static_vars = 2
 
-mean_data.append(mean_geopotential500)
-std_data.append(std_geopotential500)
+# Load the normalization factors from the JSON file
+json_file = f'{subd}/norm_factors.json'
+with open(json_file, 'r') as f:
+    statistics = json.load(f)
 
-# Temperature 850hPa
-fname= 'temperature_850hPa_1979-2018_5.625deg.npy'
-mean_temperature850 = 274.5266
-std_temperature850 = 15.5915
-
-mean_data.append(mean_temperature850)
-std_data.append(std_temperature850)
-
-fname= 'z500_t850_1979-2018_5.625deg.npy'
-
-vars = len(mean_data)
-
-mean_data = torch.tensor(mean_data)
-std_data = torch.tensor(std_data)
+mean_data = torch.tensor([stats["mean"] for stats in statistics.values()])
+std_data = torch.tensor([stats["std"] for stats in statistics.values()])
 
 norm_factors = np.stack([mean_data, std_data], axis=0)
+
+vars = len(mean_data)
 
 # -----------------------------------------------------
 
 lead_time_range = [dt, max_lead_time, dt]
+
+random_lead_time = 1 # Yes for random lead time
 
 spacing = spacing
 spinup = 0
@@ -152,6 +149,8 @@ WB_kwargs = {
             'offset':           offset,
             'initial_times':    initial_times,
             'lead_time_range':  lead_time_range,
+            'static_data_path': static_data_path,
+            'random_lead_time': random_lead_time,
             }
 
 kwargs = WB_kwargs
@@ -227,7 +226,7 @@ def train():
     # -----------------------------------------------------
 
     #model_type = 'large' #'attention'
-    input_times = 1 + len(initial_times)
+    input_times = (1 + len(initial_times))*vars + static_vars
     time_emb = 1
 
     if 'single' in model_choice:
@@ -237,7 +236,7 @@ def train():
         model_type = 'large'
 
     
-    model = EDMPrecond(filters=filters, img_channels=input_times*vars, out_channels=vars, img_resolution = 64, time_emb=time_emb, 
+    model = EDMPrecond(filters=filters, img_channels=input_times, out_channels=vars, img_resolution = 64, time_emb=time_emb, 
                        model_type=model_type, sigma_data=1, sigma_min=0.02, sigma_max=88, label_dropout=label_dropout)
     loss_fn = WGCLoss(lat, lon, device, precomputed_std=precomputed_std)
     calculate_WRMSE = calculate_AreaWeightedRMSE(lat, lon, device).calculate
@@ -332,7 +331,7 @@ def train():
 
     def time_scaling(epoch, num_epochs):
         u = epoch / (num_epochs-1)
-        return int(min(dt * (1 + (max_lead_time * np.sqrt(u)) // dt), max_lead_time))
+        return int(max(min(dt * (1 + (max_lead_time * np.sqrt(u)) // dt), max_lead_time), dt))
 
     dt_min = dt
     dt_max = dt
