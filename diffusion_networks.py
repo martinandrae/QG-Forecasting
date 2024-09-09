@@ -333,7 +333,7 @@ class SongUNet(torch.nn.Module):
                 self.dec[f'{res}x{res}_aux_norm'] = GroupNorm(num_channels=cout, eps=1e-6)
                 self.dec[f'{res}x{res}_aux_conv'] = Conv2d(in_channels=cout, out_channels=out_channels, kernel=3, **init_zero)
 
-    def forward(self, x, noise_labels, class_labels, time_labels, augment_labels=None):
+    def forward(self, x, noise_labels, class_labels, time_labels=None, augment_labels=None):
         # Mapping.
         emb = self.map_noise(noise_labels)
         emb = emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape) # swap sin/cos
@@ -454,3 +454,43 @@ class EDMPrecond(torch.nn.Module):
         return torch.as_tensor(sigma)
 
 #----------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------
+# Deterministic Precond
+
+class DetPrecond(torch.nn.Module):
+    def __init__(self,
+        img_resolution,                     # Image resolution.
+        img_channels,                       # Number of color channels.
+        out_channels,
+        model_type      = 'standard',         # Class name of the underlying model.
+        # Remove these here and place in global
+        filters         = 128,              # Number of filters in model
+        label_dropout   = 0,                # Dropout for classifier free guidance
+    ):
+        super().__init__()
+        self.img_resolution = img_resolution
+        self.img_channels = img_channels
+
+        if model_type == 'standard':
+            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
+                                embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
+                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
+                                time_emb=0, attn_resolutions=[], label_dropout=label_dropout)
+        elif model_type == 'attention':
+            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
+                                embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
+                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
+                                time_emb=0, attn_resolutions=[32,], label_dropout=label_dropout)
+        elif model_type == 'large':
+            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
+                                embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
+                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
+                                time_emb=0, attn_resolutions=[32,], label_dropout=label_dropout)
+        else:
+            raise ValueError('Model not recognized')
+    
+    def forward(self, x, time_labels, class_labels=None):
+        x = x.to(torch.float32)
+        D_x = self.model(x, time_labels, class_labels=class_labels).to(torch.float32)
+        return D_x

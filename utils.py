@@ -12,6 +12,7 @@ class QGDataset(torch.utils.data.Dataset):
                  max_lead_time,    # int: Maximum lead time we want to forecast.
                  norm_factors,     # tuple: Mean and standard deviation for normalization (mean, std_dev).
                  device,           # torch.device: Device on which tensors will be loaded.
+                 lead_time_range,  # Range of lead time
                  spinup = 0,       # int: Number of samples to discard at the start for stability.
                  spacing = 1,      # int: Sample selection interval for data reduction.
                  dtype='float32',   # str: Data type of the dataset (default 'float32').
@@ -36,6 +37,7 @@ class QGDataset(torch.utils.data.Dataset):
         self.spinup = spinup - min(initial_times)
         self.spacing = spacing
         self.mean, self.std_dev = norm_factors
+        self.kmin, self.kmax, self.d = lead_time_range
         
         self.initial_times = initial_times
         self.input_times = self.vars * len(self.initial_times)
@@ -65,6 +67,15 @@ class QGDataset(torch.utils.data.Dataset):
         """ Updates the lead time lead_time for generating future or past indices."""
         self.lead_time = lead_time
 
+    def set_lead_time_range(self, lead_time_range):
+        self.kmin, self.kmax, self.d = lead_time_range
+
+    def get_lead_time(self):
+        #return self.lead_time
+        return self.kmin + self.d * torch.randint(0, 1 + (self.kmax - self.kmin) // self.d, (1,), device=self.device)[0]
+
+        #return self.lead_time
+
     def __len__(self):
         """Returns the number of samples available in the dataset based on the computed indices."""
         return self.index_array.shape[0]
@@ -72,8 +83,10 @@ class QGDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         """Retrieves a sample and its corresponding future or past state from the dataset."""
         start_index = self.index_array[idx]
+        lead_times = self.get_lead_time()
+
         x_index = start_index + self.initial_times
-        y_index = start_index + self.lead_time
+        y_index = start_index + lead_times
 
         X_sample = self.mmap[x_index, :].astype(self.data_dtype)
         Y_sample = self.mmap[y_index, :].astype(self.data_dtype)
@@ -84,7 +97,7 @@ class QGDataset(torch.utils.data.Dataset):
         X_sample = torch.tensor(X_sample, dtype=torch.float32).view(self.input_times, self.n_lat, self.n_lon)
         Y_sample = torch.tensor(Y_sample, dtype=torch.float32).view(self.output_times, self.n_lat, self.n_lon)
 
-        return X_sample, Y_sample, self.lead_time
+        return X_sample, Y_sample, lead_times
 
 
 def get_uniform_k_dist_fn(kmin, kmax, d):

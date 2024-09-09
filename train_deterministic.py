@@ -52,13 +52,12 @@ max_lead_time = config['max_lead_time']
 label_dropout = config['label_dropout']
 initial_times = config['initial_times']
 dt = config['dt']
-model_choice = config['model']
 
 # -----------------------------------------------------
 
 # Path to the dataset, changes based on the execution environment
 
-date = '2024-09-09'  # Date of the experiment
+date = '2024-09-02'  # Date of the experiment
 result_path = Path(f'/proj/berzelius-2022-164/users/sm_maran/results/{date}/{name}/')
 
 # Check if the directory exists, and create it if it doesn't
@@ -70,7 +69,7 @@ config_file_name = Path(config_path).name
 shutil.copy(config_path, result_path / "config.json")
 
 # -----------------------------------------------------
-
+"""
 std_path = '/proj/berzelius-2022-164/users/sm_maran/data/wb/residual_stds'
 
 precomputed_std = []
@@ -84,7 +83,6 @@ precomputed_std.append(res_std_temperature850)
 
 precomputed_std = torch.stack([res_std for res_std in precomputed_std], axis=1)
 
-"""
 def residual_scaling(x):
     return precomputed_std[x.to(dtype=int)-1][None, :, None, None]
 """
@@ -121,8 +119,6 @@ norm_factors = np.stack([mean_data, std_data], axis=0)
 
 # -----------------------------------------------------
 
-lead_time_range = [dt, max_lead_time, dt]
-
 spacing = spacing
 spinup = 0
 ti = pd.date_range(datetime.datetime(1979,1,1,0), datetime.datetime(2018,12,31,23), freq='1h')
@@ -151,7 +147,6 @@ WB_kwargs = {
             'dtype':            'float32',
             'offset':           offset,
             'initial_times':    initial_times,
-            'lead_time_range':  lead_time_range,
             }
 
 kwargs = WB_kwargs
@@ -193,7 +188,7 @@ val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
 # -----------------------------------------------------
 
-def generate_ensemble_from_batch(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler):
+def generate_det_forecast_from_batch(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler):
     # Need to choose batch_size such that batch_size*n_ens fits on GPU
     model.eval()
 
@@ -207,13 +202,9 @@ def generate_ensemble_from_batch(model, n_ens=10, selected_loader = val_loader, 
 
         class_labels = previous.repeat(n_ens, 1, 1, 1)
         time_labels = torch.ones(class_labels.shape[0], device=device, dtype=int) * lead_time / max_lead_time
-
-        latents = torch.randn_like(previous_state, device=device)
         
-        predicted_state = sampler_fn(model, latents, class_labels, time_labels, sigma_max=80, sigma_min=0.03, rho=7, num_steps=20, S_churn=2.5, S_min=0.75, S_max=80, S_noise=1.05)
-        predicted_latent = predicted_state # previous_state +  * residual_scaling(torch.tensor(lead_time))
-        predicted = predicted_latent
-        
+        predicted = model(class_labels, time_labels)
+                
         predicted_unnormalized = renormalize(predicted)
         current_unnormalized = renormalize(current)
 
@@ -226,30 +217,19 @@ def train():
 
     # -----------------------------------------------------
 
-    #model_type = 'large' #'attention'
-    input_times = 1 + len(initial_times)
-    time_emb = 1
-
-    if 'single' in model_choice:
-        time_emb = 0
+    model_type = 'large' #'attention'
+    input_times = len(initial_times)
     
-    if 'residual' in model_choice:
-        model_type = 'large'
-
-    
-    model = EDMPrecond(filters=filters, img_channels=input_times*vars, out_channels=vars, img_resolution = 64, time_emb=time_emb, 
-                       model_type=model_type, sigma_data=1, sigma_min=0.02, sigma_max=88, label_dropout=label_dropout)
-    loss_fn = WGCLoss(lat, lon, device, precomputed_std=precomputed_std)
+    model = DetPrecond(filters=filters, img_channels=input_times*vars, out_channels=vars, img_resolution = 64,
+                       model_type=model_type, label_dropout=label_dropout)
+    loss_fn = WMSELoss(lat, lon, device)
     calculate_WRMSE = calculate_AreaWeightedRMSE(lat, lon, device).calculate
     calculate_WSkill = calculate_AreaWeightedRMSE(lat, lon, device).skill
     calculate_WSpread = calculate_AreaWeightedRMSE(lat, lon, device).spread
 
-    print(name, flush=True)
-    print(model_choice, flush=True)
+    print(name)
     print("Num params: ", sum(p.numel() for p in model.parameters()), flush=True)
     model.to(device)
-
-    print("Lead-times", lead_time_range, flush=True)
 
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
@@ -274,7 +254,7 @@ def train():
                                 
             target_latent = (current_latent)# - previous_state) / residual_scaling(time_label[0])
             
-            loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time, 1)
+            loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time)
             
             total_val_loss += loss.item()
                 
@@ -290,13 +270,13 @@ def train():
     
     # Sampling
     val_dataset.set_lead_time(24*3)
-    forecast, truth = generate_ensemble_from_batch(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
+    forecast, truth = generate_det_forecast_from_batch(model, n_ens=1, selected_loader = val_loader, sampler_fn=heun_sampler)
     wrmse_1 = calculate_WRMSE(forecast, truth)
     skill_1 = calculate_WSkill(forecast, truth)
     spread_1 = calculate_WSpread(forecast, truth)
 
     val_dataset.set_lead_time(24*5)
-    forecast, truth = generate_ensemble_from_batch(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
+    forecast, truth = generate_det_forecast_from_batch(model, n_ens=1, selected_loader = val_loader, sampler_fn=heun_sampler)
     wrmse_2 = calculate_WRMSE(forecast, truth)
     skill_2 = calculate_WSkill(forecast, truth)
     spread_2 = calculate_WSpread(forecast, truth)
@@ -314,38 +294,7 @@ def train():
     """
     Training starts here
     """
-
-    """def calc_lead_time_range(u, lead_time_range):
-        dt_min = 6
-        dt_max = 12
-
-        if u <= 0.1:
-            dt_min = dt
-            dt_max = dt
-
-        elif u <= 0.2:
-            dt_min = 2*dt
-            dt_max = max_lead_time /5
-
-        return new_lead_time_range"""
-    
-
-    def time_scaling(epoch, num_epochs):
-        u = epoch / (num_epochs-1)
-        return int(min(dt * (1 + (max_lead_time * np.sqrt(u)) // dt), max_lead_time))
-
-    dt_min = dt
-    dt_max = dt
-
     for epoch in range(num_epochs):
-        dt_min = dt_max
-        dt_max = time_scaling(epoch, num_epochs)
-        new_lead_time_range = [dt_min, dt_max, dt]
-        
-        # lead_time_range = [dt, int(dt * (1 + max_lead_time*epoch/num_epochs//dt)), dt]
-        train_time_loader.dataset.set_lead_time_range(new_lead_time_range)
-        print("Lead-time", new_lead_time_range, flush=True)
-
         model.train()  # Set model to training mode
         total_train_loss = 0
 
@@ -363,7 +312,7 @@ def train():
 
                 target_latent = (current_latent)# - previous_state) / residual_scaling(time_label[0])
                 
-            loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time, epoch/num_epochs)
+            loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time)
 
             total_train_loss += loss.item()
 
@@ -389,7 +338,7 @@ def train():
                                    
                 target_latent = (current_latent)# - previous_state) / residual_scaling(time_label[0])
                 
-                loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time, epoch/num_epochs)
+                loss = loss_fn(model, target_latent, class_labels, time_label/max_lead_time)
                 
                 total_val_loss += loss.item()
                     
@@ -418,13 +367,13 @@ def train():
 
         ## Val
         val_dataset.set_lead_time(24*3)
-        forecast, truth = generate_ensemble_from_batch(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
+        forecast, truth = generate_det_forecast_from_batch(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
         wrmse_1 = calculate_WRMSE(forecast, truth)
         skill_1 = calculate_WSkill(forecast, truth)
         spread_1 = calculate_WSpread(forecast, truth)
 
         val_dataset.set_lead_time(24*5)
-        forecast, truth = generate_ensemble_from_batch(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
+        forecast, truth = generate_det_forecast_from_batch(model, n_ens=10, selected_loader = val_loader, sampler_fn=heun_sampler)
         wrmse_2 = calculate_WRMSE(forecast, truth)
         skill_2 = calculate_WSkill(forecast, truth)
         spread_2 = calculate_WSpread(forecast, truth)

@@ -1,13 +1,14 @@
 {
-    "name": "z500_t850_f32_wd-1_IC[0 -1]_dt1_state_residual",
+    "name": "z500_t850_f32_IC[0]_dt1_state_residual_single-step",
     "batch_size": 32,
     "filters": 32,
     "wd": 0.1,
     "lr": 0.0001,
-    "num_epochs": 100,
+    "num_epochs": 50,
     "spacing": 1,
-    "max_lead_time": 120,
+    "max_lead_time": 1,
     "label_dropout": 0,
-    "initial_times": [0, -1],
-    "dt": 1
+    "initial_times": [0],
+    "dt": 1,
+    "model": "single residual"
     }

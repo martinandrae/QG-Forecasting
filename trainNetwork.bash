@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH -J mscthesis
-#SBATCH -t 3-00:00:00
+#SBATCH -J cont-ens
+#SBATCH -t 1-00:00:00
 #SBATCH --gpus=1 -C "thin"
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=mandra@kth.se
