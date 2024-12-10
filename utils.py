@@ -36,7 +36,7 @@ class QGDataset(torch.utils.data.Dataset):
         self.vars, self.n_lat, self.n_lon = dimensions
         self.max_lead_time = max_lead_time
         self.lead_time = lead_time
-        self.spinup = spinup - min(initial_times)
+        self.spinup = spinup + 24 #min(initial_times) # TODO Remove this hardcoding
         self.spacing = spacing
         self.mean, self.std_dev = norm_factors
         self.kmin, self.kmax, self.d = lead_time_range
@@ -83,9 +83,9 @@ class QGDataset(torch.utils.data.Dataset):
     def _generate_indices(self):
         """Generates indices for dataset partitioning according to the specified dataset_mode."""
         if self.dataset_mode == 'train':
-            start, stop = self.spinup, self.spinup + self.n_train
+            start, stop = self.spinup, self.n_train
         elif self.dataset_mode == 'val':
-            start, stop = self.spinup + self.n_train, self.spinup + self.n_train + self.n_val
+            start, stop = self.spinup + self.n_train, self.n_train + self.n_val
         elif self.dataset_mode == 'test':
             start, stop = self.spinup + self.n_train + self.n_val, self.n_samples
 

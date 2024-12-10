@@ -127,19 +127,75 @@ class calculate_WeightedRMSE:
         return self.diff(input, target).mean().sqrt()
     
     def calculate(self, input: torch.tensor, target: torch.tensor):
-        dims_to_include = list(range(3, input.dim()))
-        return self.diff(input, target).mean(dim=dims_to_include).sqrt().cpu().detach().numpy()
+        """
+        input: (no_samples, no_ens, no_lead_times, vars, dx, dy)
+        target: (no_samples, no_lead_times, vars, dx, dy)
+        """
+
+        dims_to_include = (-1, -2)
+        res = self.diff(input, target.unsqueeze(1)).mean(dim=dims_to_include).sqrt().mean(dim=0).cpu().detach().numpy()
+        return res
 
     def skill(self, input: torch.tensor, target: torch.tensor):
-        input = input.mean(dim=0, keepdim=True)
+        input = input.mean(dim=1, keepdim=True)
         return self.calculate(input, target)[0]
     
     def spread(self, input: torch.tensor, target: torch.tensor):
-        ens_mean = input.mean(dim=0)
-        N = input.size(0)
-        dims_to_include = list(range(2, target.dim()))
-        spread = ((self.weights*(ens_mean - input)**2).sum(dim=0)/(N - 1)).mean(dim=dims_to_include).sqrt().cpu().detach().numpy()
+        """
+        input: (no_samples, no_ens, no_lead_times, vars, dx, dy)
+        """
+        ens_mean = input.mean(dim=1, keepdim=True)
+        N = input.size(1)
+        dims_to_include = (-1, -2)
+        spread = ((self.weights*(ens_mean - input)**2).sum(dim=1)/(N - 1)).mean(dim=dims_to_include).sqrt().mean(dim=0).cpu().detach().numpy()
         return spread
+
+    def skill_and_spread(self, input: torch.tensor, target: torch.tensor):
+        ens_mean = input.mean(dim=1, keepdim=True)
+        dims_to_include = (-1, -2)
+
+        skill = self.diff(ens_mean, target.unsqueeze(1)).mean(dim=dims_to_include).sqrt()
+
+        N = input.size(1)
+        spread = ((self.weights*(ens_mean - input)**2).sum(dim=1)/(N - 1)).mean(dim=dims_to_include).sqrt()
+        
+        ssr = np.sqrt((N+1)/N) * (spread / skill).mean(dim=0).cpu().detach().numpy()[0]
+        skill = skill.mean(dim=0).cpu().detach().numpy()[0]
+        spread = spread.mean(dim=0).cpu().detach().numpy()
+
+        return skill, spread, ssr
+
+    def skill_and_spread_new(self, input: torch.tensor, target: torch.tensor):
+        """New metrics that aren't biased"""
+        ens_mean = input.mean(dim=1, keepdim=True)
+        dims_to_include = (-1, -2)
+
+        skill = self.diff(ens_mean, target.unsqueeze(1)).mean(dim=dims_to_include)#.sqrt()
+
+        N = input.size(1)
+        spread = ((self.weights*(ens_mean - input)**2).sum(dim=1)/(N - 1)).mean(dim=dims_to_include)#.sqrt()
+        
+        #ssr = np.sqrt((N+1)/N) * (spread / skill).mean(dim=0).cpu().detach().numpy()[0]
+        skill = skill.mean(dim=0).cpu().detach().numpy()[0]
+        spread = spread.mean(dim=0).cpu().detach().numpy()
+
+        return skill, spread#, ssr
+
+
+    def CRPS(self, input: torch.tensor, target: torch.tensor):
+        dims_to_include = (-1, -2)
+
+        a = (input - target.unsqueeze(1)).abs().mean(dim=1)
+        b = (input.unsqueeze(2) - input.unsqueeze(1)).abs().mean(dim=(1,2)) * 0.5
+        c = (self.weights*(a - b)).mean(dim=dims_to_include).mean(dim=0)
+        return c.cpu().detach().numpy()
+    
+    
+    def mae(self, input: torch.tensor, target: torch.tensor):
+        dims_to_include = (-1, -2)
+
+        c = (self.weights*(input - target)).abs().mean(dim=dims_to_include).mean(dim=(0,1))
+        return c.cpu().detach().numpy()
 
 
 
