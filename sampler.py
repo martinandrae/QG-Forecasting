@@ -1,9 +1,7 @@
-# Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-#
-# This work is licensed under a Creative Commons
-# Attribution-NonCommercial-ShareAlike 4.0 International License.
-# You should have received a copy of the license along with this
-# work. If not, see http://creativecommons.org/licenses/by-nc-sa/4.0/
+# Code adapted from:
+# Elucidating the Design Space of Diffusion-Based Generative Models (EDM)
+# Tero Karras, Miika Aittala, Timo Aila, Samuli Laine
+# https://github.com/NVlabs/edm
 
 """Generate random images using the techniques described in the paper
 "Elucidating the Design Space of Diffusion-Based Generative Models"."""

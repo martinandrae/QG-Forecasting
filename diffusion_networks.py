@@ -1,9 +1,7 @@
-# Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-#
-# This work is licensed under a Creative Commons
-# Attribution-NonCommercial-ShareAlike 4.0 International License.
-# You should have received a copy of the license along with this
-# work. If not, see http://creativecommons.org/licenses/by-nc-sa/4.0/
+# Code adapted from:
+# Elucidating the Design Space of Diffusion-Based Generative Models (EDM)
+# Tero Karras, Miika Aittala, Timo Aila, Samuli Laine
+# https://github.com/NVlabs/edm
 
 """Model architectures and preconditioning schemes used in the paper
 "Elucidating the Design Space of Diffusion-Based Generative Models"."""
@@ -404,8 +402,6 @@ class EDMPrecond(torch.nn.Module):
         sigma_min       = 0,                # Minimum supported noise level.
         sigma_max       = float('inf'),     # Maximum supported noise level.
         sigma_data      = 0.5,              # Expected standard deviation of the training data.
-        model_type      = 'standard',         # Class name of the underlying model.
-        # Remove these here and place in global
         filters         = 128,              # Number of filters in model
         time_emb        = 0,                # If we embed time or not
         label_dropout   = 0,                # Dropout for classifier free guidance
@@ -416,24 +412,11 @@ class EDMPrecond(torch.nn.Module):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.sigma_data = sigma_data
-
-        if model_type == 'standard':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
-                                embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
-                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
-                                time_emb=time_emb, attn_resolutions=[], label_dropout=label_dropout)
-        elif model_type == 'attention':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
-                                embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
-                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
-                                time_emb=time_emb, attn_resolutions=[32,], label_dropout=label_dropout)
-        elif model_type == 'large':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
-                                embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
-                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
-                                time_emb=time_emb, attn_resolutions=[32,], label_dropout=label_dropout)
-        else:
-            raise ValueError('Model not recognized')
+        
+        self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
+                            embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
+                            channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
+                            time_emb=time_emb, attn_resolutions=[32,], label_dropout=label_dropout)
     
     def forward(self, x, sigma, class_labels=None, time_labels=None):
         x = x.to(torch.float32)
@@ -452,45 +435,3 @@ class EDMPrecond(torch.nn.Module):
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
-
-#----------------------------------------------------------------------------
-
-#----------------------------------------------------------------------------
-# Deterministic Precond
-
-class DetPrecond(torch.nn.Module):
-    def __init__(self,
-        img_resolution,                     # Image resolution.
-        img_channels,                       # Number of color channels.
-        out_channels,
-        model_type      = 'standard',         # Class name of the underlying model.
-        # Remove these here and place in global
-        filters         = 128,              # Number of filters in model
-        label_dropout   = 0,                # Dropout for classifier free guidance
-    ):
-        super().__init__()
-        self.img_resolution = img_resolution
-        self.img_channels = img_channels
-
-        if model_type == 'standard':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
-                                embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
-                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
-                                time_emb=0, attn_resolutions=[], label_dropout=label_dropout)
-        elif model_type == 'attention':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
-                                embedding_type='fourier', encoder_type='standard', decoder_type='standard', \
-                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
-                                time_emb=0, attn_resolutions=[32,], label_dropout=label_dropout)
-        elif model_type == 'large':
-            self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
-                                embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
-                                channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
-                                time_emb=0, attn_resolutions=[32,], label_dropout=label_dropout)
-        else:
-            raise ValueError('Model not recognized')
-    
-    def forward(self, x, time_labels, class_labels=None):
-        x = x.to(torch.float32)
-        D_x = self.model(x, time_labels, class_labels=class_labels).to(torch.float32)
-        return D_x

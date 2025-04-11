@@ -1,9 +1,9 @@
 slurm*
-*.pth
+
 *.pdf
 *.csv
 __pycache__
-results
+
 figures
 gifs
 *.zarr

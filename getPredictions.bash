@@ -12,7 +12,7 @@ mamba activate QG
 cd /proj/berzelius-2022-164/users/sm_maran/QG-Forecasting
 
 # Path to your Python script
-PYTHON_SCRIPT_PATH="get_predictions.py"
+PYTHON_SCRIPT_PATH="predict.py"
 
 # The first command line argument specifies the config number
 CONFIG_NUMBER="$1"
