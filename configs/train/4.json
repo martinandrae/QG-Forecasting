@@ -2,13 +2,12 @@
     "name": "iterative-6h",
     "batch_size": 256,
     "filters": 32,
-    "wd": 0.1,
-    "lr": 0.0005,
+    "weight_decay": 0.1,
+    "learning_rate": 0.0005,
     "num_epochs": 300,
     "spacing": 1,
-    "max_lead_time": 6,
-    "label_dropout": 0,
-    "initial_times": [0, -6],
-    "dt": 6,
-    "model": "single residual"
-    }
+    "t_max": 6,
+    "conditioning_times": [0, -6],
+    "delta_t": 6,
+    "model": "autoregressive"
+}

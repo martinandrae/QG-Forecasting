@@ -1,10 +1,7 @@
-slurm*
 
 *.pdf
+*.png
+*.gif
 *.csv
 __pycache__
-
-figures
-gifs
 *.zarr
-*.json

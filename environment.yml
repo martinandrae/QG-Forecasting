@@ -1,4 +1,4 @@
-name: QG
+name: ARCI
 channels:
   - defaults
   - conda-forge
@@ -18,5 +18,7 @@ dependencies:
   - torchvision=0.16.2
   - torchaudio=2.1.2
   - pytorch-cuda=11.8
-  - pytorch-lightning=2.1.3
   - cartopy=0.21.1
+  - ffmpeg
+  - zarr
+  - jupyterlab=3.0.0

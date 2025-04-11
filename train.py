@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import csv
-import math
 import json  
 import argparse
 import shutil
@@ -18,14 +17,14 @@ from utils import *
 from loss import *
 from sampler import *
 
-data_directory = './data'
-result_directory = './results'
+data_directory = '../data'
+result_directory = './models'
 
 variable_names = ['z500', 't850', 't2m', 'u10', 'v10']
 num_variables, num_static_fields = 5, 2
 max_horizon = 240 # Maximum time horizon for the model. Used for scaling time embedding and making sure we don't go outside dataset
 
-device = torch.device('cpu' if torch.cuda.is_available() else 'cpu')
+device = torch.device('mps' if torch.mps.is_available() else 'cpu')
 
 parser = argparse.ArgumentParser(description='Run model with configuration from JSON file.')
 parser.add_argument('config_path', type=str, help='Path to JSON configuration file.')
@@ -49,7 +48,6 @@ batch_size      = config['batch_size']
 num_epochs      = config['num_epochs']
 weight_decay    = config['weight_decay']
 learning_rate   = config['learning_rate']
-label_dropout   = config['label_dropout']
 
 filters         = config['filters']
 conditioning_times   = config['conditioning_times']
@@ -87,8 +85,6 @@ n_samples, n_train, n_val = len(ti), sum(ti.year <= 2015), sum((ti.year >= 2016)
 # Load the latitudes and longitudes
 lat, lon = np.load(f'{data_directory}/latlon_1979-2018_5.625deg.npz').values()
 
-
-
 kwargs = {
             'dataset_path':     f'{data_directory}/z500_t850_t2m_u10_v10_1979-2018_5.625deg.npy',
             'sample_counts':    (n_samples, n_train, n_val),
@@ -124,8 +120,7 @@ else:
 
 # Define the model and loss function
 model = EDMPrecond(filters=filters, img_channels=input_times, out_channels=num_variables, img_resolution = 64, time_emb=time_emb, 
-                    sigma_data=1, sigma_min=0.02, sigma_max=88, label_dropout=label_dropout)
-
+                    sigma_data=1, sigma_min=0.02, sigma_max=88)
 
 loss_fn = WGCLoss(lat, lon, device, precomputed_std=residual_stds)
 
@@ -157,7 +152,7 @@ for epoch in range(num_epochs):
     # Training phase
     model.train()
     total_train_loss = 0
-    for previous, current, time_label in (train_time_loader):
+    for previous, current, time_label in tqdm(train_time_loader):
         current = current.to(device)
         previous = previous.to(device)
         time_label = time_label.to(device)
